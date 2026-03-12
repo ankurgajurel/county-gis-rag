@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
     log_level: str = "INFO"
 
     @property

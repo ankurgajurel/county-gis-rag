@@ -1,6 +1,8 @@
 services:
   db:
-    image: postgis/postgis:16-3.4
+    build:
+      context: .
+      dockerfile: Dockerfile.db
     container_name: county_gis_db
     environment:
       POSTGRES_DB: county_gis

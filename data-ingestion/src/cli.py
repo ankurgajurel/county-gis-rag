@@ -23,6 +23,8 @@ def main():
 
     sub.add_parser("seed-zoning", help="Seed zoning districts for municipalities")
     sub.add_parser("list", help="List available county providers")
+    sub.add_parser("embed", help="Build embeddings for RAG knowledge base")
+    sub.add_parser("chat", help="Start interactive chat with the data")
 
     args = parser.parse_args()
 
@@ -39,6 +41,14 @@ def main():
 
     if args.command == "seed-zoning":
         asyncio.run(_seed_zoning())
+        return
+
+    if args.command == "embed":
+        asyncio.run(_embed())
+        return
+
+    if args.command == "chat":
+        asyncio.run(_chat())
         return
 
     try:
@@ -96,6 +106,36 @@ async def _zoning(provider):
 
     async with aiohttp.ClientSession() as session:
         await ingest_municode_zoning(session, cfg.fips_code, county_id)
+
+
+async def _embed():
+    from src.chat.embeddings import build_and_embed
+    await build_and_embed()
+
+
+async def _chat():
+    from src.chat.engine import ChatEngine
+
+    engine = ChatEngine()
+    await engine.initialize()
+
+    print("County GIS Chat (type 'quit' to exit)")
+    print("-" * 40)
+
+    while True:
+        try:
+            user_input = input("\nyou: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("quit", "exit", "q"):
+            break
+
+        response = await engine.chat(user_input)
+        print(f"\nassistant: {response}")
 
 
 async def _seed_zoning():
