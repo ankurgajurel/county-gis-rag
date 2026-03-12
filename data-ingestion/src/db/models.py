@@ -248,7 +248,7 @@ class Parcel(Base):
     county: Mapped["County"] = relationship(back_populates="parcels")
 
     __table_args__ = (
-        Index("idx_parcels_geom", "geom", postgresql_using="gist"),
+        # GeoAlchemy2 auto-creates a GIST index on geom, so we don't add one
         Index("idx_parcels_county_pin", "county_id", "pin", unique=True),
         Index("idx_parcels_municipality", "municipality"),
         Index("idx_parcels_raw", "raw_attributes", postgresql_using="gin"),
@@ -292,7 +292,6 @@ class GISFeature(Base):
     county: Mapped["County"] = relationship(back_populates="gis_features")
 
     __table_args__ = (
-        Index("idx_gis_features_geom", "geom", postgresql_using="gist"),
         Index("idx_gis_features_layer", "county_id", "source_layer_id"),
         Index("idx_gis_features_attrs", "attributes", postgresql_using="gin"),
     )
@@ -384,6 +383,4 @@ class ZoningGeometry(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (
-        Index("idx_zoning_geom", "geom", postgresql_using="gist"),
-    )
+    __table_args__: tuple = ()
