@@ -107,6 +107,7 @@ class ArcGISCrawler:
                 if layer_ref.get("subLayerIds"):
                     continue
 
+                logger.debug("  → layer %d: %s", layer_ref["id"], layer_ref["name"])
                 layer = await self._discover_layer(
                     base_url, name, svc_type, layer_ref["id"], layer_ref["name"]
                 )

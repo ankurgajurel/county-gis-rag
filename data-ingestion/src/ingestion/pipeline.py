@@ -49,6 +49,13 @@ async def run_pipeline(provider: BaseProvider, full: bool = True):
                 session, rate_limiter, provider, county_id, data_source_id
             )
 
+        await _ingest_all_layers(
+            session, rate_limiter, county_id, data_source_id, cfg
+        )
+
+        from src.ingestion.zoning import ingest_municode_zoning
+        await ingest_municode_zoning(session, cfg.fips_code, county_id)
+
         logger.info("Pipeline complete for %s", cfg.name)
 
 
@@ -102,13 +109,8 @@ async def _ingest_parcels(
     data_source_id: int,
 ):
     cfg = provider.config()
-    parts = cfg.parcel_service.split("/")
-    if len(parts) >= 2:
-        service_name = "/".join(parts[:-1]) if "/" in cfg.parcel_service else parts[0]
-        service_type = cfg.parcel_service_type
-    else:
-        service_name = parts[0]
-        service_type = cfg.parcel_service_type
+    service_name = cfg.parcel_service
+    service_type = cfg.parcel_service_type
 
     async with async_session() as db:
         result = await db.execute(
@@ -192,6 +194,142 @@ async def _ingest_parcels(
             )
             await db.commit()
         raise
+
+
+MAX_FEATURES_PER_LAYER = 500_000
+
+
+async def _ingest_all_layers(
+    session: aiohttp.ClientSession,
+    rate_limiter: RateLimiter,
+    county_id: int,
+    data_source_id: int,
+    cfg,
+):
+    async with async_session() as db:
+        result = await db.execute(
+            select(DiscoveredLayer).where(
+                DiscoveredLayer.data_source_id == data_source_id,
+            )
+        )
+        all_layers = result.scalars().all()
+
+    parcel_svc = cfg.parcel_service or ""
+    fetcher = FeatureFetcher(session, rate_limiter)
+
+    ingested = 0
+    skipped = 0
+
+    for layer in all_layers:
+        if layer.service_name == parcel_svc and layer.layer_id == 0:
+            continue
+
+        if layer.service_type != "FeatureServer":
+            continue
+
+        if layer.feature_count and layer.feature_count > MAX_FEATURES_PER_LAYER:
+            logger.info(
+                "Skipping %s/%d (%d features, exceeds %d limit)",
+                layer.service_name, layer.layer_id,
+                layer.feature_count, MAX_FEATURES_PER_LAYER,
+            )
+            skipped += 1
+            continue
+
+        if not layer.geometry_type:
+            continue
+
+        try:
+            run = await _create_run(county_id, layer.id, "full")
+
+            features = await fetcher.fetch_all(
+                cfg.arcgis_base_url,
+                layer.service_name,
+                layer.service_type,
+                layer.layer_id,
+                max_record_count=layer.max_record_count or 1000,
+            )
+
+            if not features:
+                await _finish_run(run, 0, 0, 0)
+                continue
+
+            rows = normalize_gis_features(
+                features, county_id, layer.id, layer.layer_name, run,
+            )
+
+            stored, failed = await _store_gis_features(rows)
+            await _finish_run(run, len(features), stored, failed)
+
+            logger.info(
+                "Ingested %s/%s/%d: %d features stored",
+                layer.service_name, layer.service_type, layer.layer_id, stored,
+            )
+            ingested += 1
+
+        except Exception as e:
+            logger.error(
+                "Failed layer %s/%d: %s", layer.service_name, layer.layer_id, e,
+            )
+
+    logger.info(
+        "All-layer ingestion: %d layers ingested, %d skipped (too large)",
+        ingested, skipped,
+    )
+
+
+async def _create_run(county_id: int, layer_id: int, run_type: str) -> int:
+    async with async_session() as db:
+        run = IngestionRun(
+            county_id=county_id, layer_id=layer_id,
+            run_type=run_type, status="running",
+        )
+        db.add(run)
+        await db.commit()
+        return run.id
+
+
+async def _finish_run(
+    run_id: int, fetched: int, stored: int, failed: int,
+):
+    async with async_session() as db:
+        await db.execute(
+            update(IngestionRun)
+            .where(IngestionRun.id == run_id)
+            .values(
+                status="completed" if failed == 0 else "partial",
+                features_fetched=fetched,
+                features_stored=stored,
+                features_failed=failed,
+                completed_at=datetime.now(timezone.utc),
+            )
+        )
+        await db.commit()
+
+
+async def _store_gis_features(rows: list[dict]) -> tuple[int, int]:
+    stored = 0
+    failed = 0
+
+    for i in range(0, len(rows), BATCH_SIZE):
+        batch = rows[i : i + BATCH_SIZE]
+
+        async with async_session() as db:
+            try:
+                for row in batch:
+                    wkt = row.pop("geom", None)
+                    geom_elem = WKTElement(wkt, srid=4326) if wkt else None
+                    db.add(GISFeature(**row, geom=geom_elem))
+
+                await db.commit()
+                stored += len(batch)
+
+            except Exception as e:
+                logger.error("GIS feature batch %d-%d failed: %s", i, i + len(batch), e)
+                await db.rollback()
+                failed += len(batch)
+
+    return stored, failed
 
 
 async def _store_parcels(rows: list[dict]) -> tuple[int, int]:

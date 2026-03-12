@@ -11,7 +11,7 @@ def setup_logging():
 
     logging.basicConfig(
         level=level,
-        format="%(asctime)s [%(levelname)-7s] %(name)s — %(message)s",
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
         datefmt="%H:%M:%S",
         stream=sys.stderr,
         force=True,

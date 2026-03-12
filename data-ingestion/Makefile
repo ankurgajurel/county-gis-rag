@@ -1,9 +1,9 @@
 .PHONY: db db-down migrate discover ingest list clean
 
-db:
+docker-up:
 	docker compose up -d
 
-db-down:
+docker-down:
 	docker compose down
 
 migrate:
@@ -14,6 +14,12 @@ discover:
 
 ingest:
 	uv run python -m src.cli ingest $(COUNTY)
+
+zoning:
+	uv run python -m src.cli zoning $(COUNTY)
+
+seed-zoning:
+	uv run python -m src.cli seed-zoning
 
 list:
 	uv run python -m src.cli list

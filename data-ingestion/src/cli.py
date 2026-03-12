@@ -18,6 +18,10 @@ def main():
     ingest_cmd = sub.add_parser("ingest", help="Run full ingestion pipeline")
     ingest_cmd.add_argument("county", help="County name or FIPS code")
 
+    zoning_cmd = sub.add_parser("zoning", help="Ingest zoning data only")
+    zoning_cmd.add_argument("county", help="County name or FIPS code")
+
+    sub.add_parser("seed-zoning", help="Seed zoning districts for municipalities")
     sub.add_parser("list", help="List available county providers")
 
     args = parser.parse_args()
@@ -33,6 +37,10 @@ def main():
             print(name)
         return
 
+    if args.command == "seed-zoning":
+        asyncio.run(_seed_zoning())
+        return
+
     try:
         provider = get_provider(args.county)
     except ValueError as e:
@@ -43,6 +51,8 @@ def main():
         asyncio.run(_discover(provider))
     elif args.command == "ingest":
         asyncio.run(_ingest(provider))
+    elif args.command == "zoning":
+        asyncio.run(_zoning(provider))
 
 
 async def _discover(provider):
@@ -74,6 +84,23 @@ async def _discover(provider):
 async def _ingest(provider):
     from src.ingestion.pipeline import run_pipeline
     await run_pipeline(provider)
+
+
+async def _zoning(provider):
+    import aiohttp
+    from src.ingestion.pipeline import _ensure_county_and_source
+    from src.ingestion.zoning import ingest_municode_zoning
+
+    cfg = provider.config()
+    county_id, _ = await _ensure_county_and_source(cfg)
+
+    async with aiohttp.ClientSession() as session:
+        await ingest_municode_zoning(session, cfg.fips_code, county_id)
+
+
+async def _seed_zoning():
+    from src.ingestion.seed_zoning import seed_zoning_districts
+    await seed_zoning_districts()
 
 
 if __name__ == "__main__":

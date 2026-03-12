@@ -12,7 +12,7 @@ class CookProvider(BaseProvider):
             state_fips="17",
             arcgis_base_url="https://gis12.cookcountyil.gov/arcgis/rest/services",
             hub_url="https://hub-cookcountyil.opendata.arcgis.com/",
-            rate_limit=2.0,  # slower server
+            rate_limit=4.0,
             parcel_service="parcel_current_beta",
             parcel_service_type="FeatureServer",
         )
