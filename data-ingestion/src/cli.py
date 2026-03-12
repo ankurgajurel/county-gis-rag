@@ -134,8 +134,10 @@ async def _chat():
         if user_input.lower() in ("quit", "exit", "q"):
             break
 
-        response = await engine.chat(user_input)
-        print(f"\nassistant: {response}")
+        print("\nassistant: ", end="", flush=True)
+        async for token in engine.chat_stream(user_input):
+            print(token, end="", flush=True)
+        print()
 
 
 async def _seed_zoning():

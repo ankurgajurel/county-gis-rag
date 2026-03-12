@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { sendMessage, resetChat } from "@/lib/api";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ReactMarkdown from "react-markdown";
+import { streamChat, resetChat } from "@/lib/api";
 
 interface Message {
   role: "user" | "assistant";
@@ -21,30 +20,59 @@ export function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const mutation = useMutation({
-    mutationFn: sendMessage,
-    onSuccess: (data) => {
-      setSessionId(data.session_id);
+  const submitMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isStreaming) return;
+
+      setError(null);
+      setIsStreaming(true);
+      setInput("");
+
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: data.response },
+        { role: "user", content: trimmed },
+        { role: "assistant", content: "" },
       ]);
-    },
-  });
 
-  const submitMessage = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || mutation.isPending) return;
-
-      setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
-      setInput("");
-      mutation.mutate({ message: trimmed, session_id: sessionId });
+      await streamChat(
+        { message: trimmed, session_id: sessionId },
+        {
+          onSessionId: (id) => setSessionId(id),
+          onToken: (token) => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last.role === "assistant") {
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: last.content + token,
+                };
+              }
+              return updated;
+            });
+          },
+          onDone: () => setIsStreaming(false),
+          onError: (err) => {
+            setError(err.message);
+            setIsStreaming(false);
+            setMessages((prev) => {
+              // remove the empty assistant message
+              if (prev[prev.length - 1]?.content === "") {
+                return prev.slice(0, -1);
+              }
+              return prev;
+            });
+          },
+        }
+      );
     },
-    [mutation, sessionId]
+    [isStreaming, sessionId]
   );
 
   const handleSubmit = useCallback(() => {
@@ -55,6 +83,7 @@ export function Chat() {
     if (sessionId) await resetChat(sessionId);
     setMessages([]);
     setSessionId(null);
+    setError(null);
   }, [sessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -79,7 +108,7 @@ export function Chat() {
   return (
     <div className="flex h-dvh flex-col bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-border/50 px-6 py-4">
+      <header className="flex shrink-0 items-center justify-between border-b border-border/50 px-6 py-4">
         <h1 className="text-sm font-medium tracking-tight text-foreground">
           County GIS Chat
         </h1>
@@ -94,7 +123,7 @@ export function Chat() {
       </header>
 
       {/* Messages */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-6">
           {messages.length === 0 ? (
             <div className="flex h-[60vh] flex-col items-center justify-center">
@@ -135,32 +164,30 @@ export function Chat() {
                     <p className="text-xs font-medium text-muted-foreground mb-1.5">
                       {msg.role === "user" ? "You" : "Assistant"}
                     </p>
-                    <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
-                      {msg.content}
-                    </div>
+                    {msg.role === "assistant" ? (
+                      <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-sm leading-relaxed [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:space-y-1 [&_ol]:space-y-1 [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_table]:text-sm [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border [&_th]:bg-muted">
+                        {msg.content ? (
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        ) : (
+                          isStreaming && (
+                            <div className="flex items-center gap-1.5 pt-1">
+                              <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40" />
+                              <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
+                              <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                        {msg.content}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
 
-              {mutation.isPending && (
-                <div className="flex gap-4">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                    A
-                  </div>
-                  <div className="pt-0.5">
-                    <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                      Assistant
-                    </p>
-                    <div className="flex items-center gap-1.5 pt-1">
-                      <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40" />
-                      <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
-                      <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {mutation.isError && (
+              {error && (
                 <div className="ml-11 text-sm text-destructive">
                   Failed to send message. Please try again.
                 </div>
@@ -170,10 +197,10 @@ export function Chat() {
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
 
-      {/* Input */}
-      <div className="border-t border-border/50 px-6 py-4">
+      {/* Input — sticky bottom */}
+      <div className="sticky bottom-0 shrink-0 border-t border-border/50 bg-background px-6 py-4">
         <div className="mx-auto max-w-2xl">
           <div className="relative flex items-end rounded-2xl border border-border bg-muted/30 transition-colors focus-within:border-foreground/20 focus-within:bg-background">
             <textarea
@@ -187,7 +214,7 @@ export function Chat() {
             />
             <button
               onClick={handleSubmit}
-              disabled={!input.trim() || mutation.isPending}
+              disabled={!input.trim() || isStreaming}
               className="m-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
               aria-label="Send message"
             >

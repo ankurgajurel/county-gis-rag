@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 
 from openai import AsyncOpenAI
 
@@ -26,6 +27,9 @@ class ChatEngine:
         self.system_prompt = await build_system_prompt()
         self.messages = []
 
+    def _build_messages(self):
+        return [{"role": "system", "content": self.system_prompt}, *self.messages]
+
     async def chat(self, user_message: str) -> str:
         if not self.system_prompt:
             await self.initialize()
@@ -35,26 +39,14 @@ class ChatEngine:
         for _ in range(MAX_TOOL_ROUNDS):
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    *self.messages,
-                ],
+                messages=self._build_messages(),
                 tools=TOOL_SCHEMAS,
             )
 
             choice = response.choices[0]
 
             if choice.finish_reason == "tool_calls":
-                self.messages.append(choice.message.model_dump())
-
-                for tool_call in choice.message.tool_calls:
-                    result = await self._execute_tool(tool_call)
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(result, default=str),
-                    })
-
+                await self._handle_tool_calls(choice.message)
                 continue
 
             assistant_text = choice.message.content or ""
@@ -62,6 +54,54 @@ class ChatEngine:
             return assistant_text
 
         return "I've made too many tool calls trying to answer this. Could you rephrase or simplify your question?"
+
+    async def chat_stream(self, user_message: str) -> AsyncGenerator[str, None]:
+        if not self.system_prompt:
+            await self.initialize()
+
+        self.messages.append({"role": "user", "content": user_message})
+
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=self._build_messages(),
+                tools=TOOL_SCHEMAS,
+            )
+
+            choice = response.choices[0]
+
+            if choice.finish_reason == "tool_calls":
+                await self._handle_tool_calls(choice.message)
+                continue
+
+            # final answer — stream it
+            full_text = ""
+            stream = await self.client.chat.completions.create(
+                model=self.model,
+                messages=self._build_messages(),
+                stream=True,
+            )
+
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    full_text += delta
+                    yield delta
+
+            self.messages.append({"role": "assistant", "content": full_text})
+            return
+
+        yield "I've made too many tool calls trying to answer this. Could you rephrase or simplify your question?"
+
+    async def _handle_tool_calls(self, message):
+        self.messages.append(message.model_dump())
+        for tool_call in message.tool_calls:
+            result = await self._execute_tool(tool_call)
+            self.messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps(result, default=str),
+            })
 
     async def _execute_tool(self, tool_call) -> dict:
         name = tool_call.function.name
