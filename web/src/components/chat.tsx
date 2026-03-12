@@ -10,10 +10,11 @@ interface Message {
 }
 
 const SUGGESTIONS = [
-  "What zoning types are available in the county?",
-  "Show me residential zones near downtown",
-  "What are the land use restrictions for zone R-1?",
-  "Which parcels were rezoned in the last year?",
+  "What's the zoning for 425 Fawell Blvd in Naperville?",
+  "Compare residential zoning regulations across all municipalities",
+  "Find the 10 highest assessed properties in Naperville",
+  "Which GIS layers have flood zone data?",
+  "What are the setback requirements for R-1 in Wheaton?",
 ];
 
 export function Chat() {
@@ -136,11 +137,13 @@ export function Chat() {
                 </p>
               </div>
               <div className="mt-8 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
-                {SUGGESTIONS.map((s) => (
+                {SUGGESTIONS.map((s, i) => (
                   <button
                     key={s}
                     onClick={() => submitMessage(s)}
-                    className="rounded-lg border border-border/60 px-4 py-3 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground"
+                    className={`rounded-lg border border-border/60 px-4 py-3 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground ${
+                      i === SUGGESTIONS.length - 1 ? "sm:col-span-2 sm:mx-auto sm:w-fit sm:text-center" : ""
+                    }`}
                   >
                     {s}
                   </button>
