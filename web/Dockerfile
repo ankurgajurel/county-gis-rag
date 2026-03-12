@@ -1,11 +1,11 @@
 # Stage 1: Install dependencies
-FROM oven/bun:1 AS deps
+FROM --platform=linux/amd64 oven/bun:1 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Stage 2: Build the application
-FROM oven/bun:1 AS builder
+FROM --platform=linux/amd64 oven/bun:1 AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -16,7 +16,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN bun run build
 
 # Stage 3: Production image
-FROM node:22-alpine AS runner
+FROM --platform=linux/amd64 node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

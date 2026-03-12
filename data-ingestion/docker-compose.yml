@@ -18,6 +18,29 @@ services:
       timeout: 5s
       retries: 5
 
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: county_gis_app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    container_name: county_gis_web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - app
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: county_gis_pgadmin
