@@ -1,6 +1,6 @@
 """
 Recursive ArcGIS REST catalog crawler.
-Walks: root → folders → services → layers
+Walks: root -> folders -> services -> layers
 """
 
 import logging
@@ -79,7 +79,9 @@ class ArcGISCrawler:
                 logger.info("Folder '%s': %d services", folder, len(folder_services))
 
                 for svc in folder_services:
-                    layers = await self._discover_service(base_url, svc["name"], svc["type"])
+                    layers = await self._discover_service(
+                        base_url, svc["name"], svc["type"]
+                    )
                     all_layers.extend(layers)
             except Exception as e:
                 logger.error("Failed folder '%s': %s", folder, e)
@@ -162,11 +164,15 @@ class ArcGISCrawler:
             )
 
         except Exception as e:
-            logger.error("Failed layer %s/%s/%d: %s", service_name, service_type, layer_id, e)
+            logger.error(
+                "Failed layer %s/%s/%d: %s", service_name, service_type, layer_id, e
+            )
             return None
 
 
-async def save_discovered_layers(session, data_source_id: int, layers: list[LayerInfo]) -> int:
+async def save_discovered_layers(
+    session, data_source_id: int, layers: list[LayerInfo]
+) -> int:
     """Upsert discovered layers to DB. Re-running updates metadata instead of duplicating."""
     from sqlalchemy.dialects.postgresql import insert
     from src.db.models import DiscoveredLayer
@@ -186,7 +192,12 @@ async def save_discovered_layers(session, data_source_id: int, layers: list[Laye
             spatial_reference=layer.spatial_reference,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=["data_source_id", "service_name", "service_type", "layer_id"],
+            index_elements=[
+                "data_source_id",
+                "service_name",
+                "service_type",
+                "layer_id",
+            ],
             set_={
                 "layer_name": stmt.excluded.layer_name,
                 "geometry_type": stmt.excluded.geometry_type,
