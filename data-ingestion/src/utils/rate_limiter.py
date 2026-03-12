@@ -1,14 +1,4 @@
-"""
-Token bucket rate limiter for async HTTP requests.
-
-Why token bucket: it smooths out bursty traffic. Instead of sending 10 requests
-instantly then waiting 2 seconds, it spreads them evenly — 5/sec by default.
-
-Usage:
-    limiter = RateLimiter(rate=5.0, burst=10)
-    async with limiter:
-        await session.get(url)  # blocks if we're over the limit
-"""
+"""Token bucket rate limiter. Use as: async with limiter: ..."""
 
 import asyncio
 import time
@@ -16,11 +6,6 @@ import time
 
 class RateLimiter:
     def __init__(self, rate: float = 5.0, burst: int = 10):
-        """
-        Args:
-            rate: Requests per second (steady state)
-            burst: Max tokens stored — allows short bursts above rate
-        """
         self.rate = rate
         self.burst = burst
         self.tokens = float(burst)

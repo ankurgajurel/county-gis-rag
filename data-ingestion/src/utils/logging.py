@@ -1,15 +1,4 @@
-"""
-Logging setup.
-
-Configures Python's standard logging with a clean format that includes
-timestamps and module names. Used everywhere via:
-
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info("Discovered %d layers", count)
-
-Call setup_logging() once at startup (in cli.py).
-"""
+"""Logging setup. Call setup_logging() once at startup."""
 
 import logging
 import sys
@@ -28,6 +17,5 @@ def setup_logging():
         force=True,
     )
 
-    # Quiet down noisy libraries
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy").setLevel(logging.WARNING)

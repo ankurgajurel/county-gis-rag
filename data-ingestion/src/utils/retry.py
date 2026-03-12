@@ -1,25 +1,9 @@
-"""
-Retry decorator with exponential backoff and jitter.
-
-On transient failures (timeouts, 429s, 500s), we wait and try again:
-  attempt 1: fail → wait ~1s
-  attempt 2: fail → wait ~2s
-  attempt 3: fail → wait ~4s
-  attempt 4: give up, raise
-
-Jitter adds randomness to the wait so multiple workers don't all retry
-at the same instant and overwhelm the server.
-
-Usage:
-    @retry(max_attempts=3)
-    async def fetch(url):
-        ...
-"""
+"""Retry decorator with exponential backoff + jitter."""
 
 import asyncio
 import functools
-import random
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +24,12 @@ def retry(
                 except retryable_exceptions as e:
                     last_exception = e
                     if attempt == max_attempts:
-                        logger.error(
-                            "All %d attempts failed for %s: %s",
-                            max_attempts, func.__name__, e,
-                        )
+                        logger.error("All %d attempts failed for %s: %s", max_attempts, func.__name__, e)
                         raise
-                    # Exponential backoff with jitter
                     delay = min(backoff_base * (2 ** (attempt - 1)), backoff_max)
-                    delay *= 0.5 + random.random()  # jitter: 50%-150% of delay
-                    logger.warning(
-                        "Attempt %d/%d failed for %s: %s. Retrying in %.1fs",
-                        attempt, max_attempts, func.__name__, e, delay,
-                    )
+                    delay *= 0.5 + random.random()
+                    logger.warning("Attempt %d/%d failed for %s: %s. Retry in %.1fs", attempt, max_attempts, func.__name__, e, delay)
                     await asyncio.sleep(delay)
-            raise last_exception  # should never reach here
+            raise last_exception
         return wrapper
     return decorator
