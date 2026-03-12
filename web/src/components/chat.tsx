@@ -4,12 +4,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { sendMessage, resetChat } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
+
+const SUGGESTIONS = [
+  "What zoning types are available in the county?",
+  "Show me residential zones near downtown",
+  "What are the land use restrictions for zone R-1?",
+  "Which parcels were rezoned in the last year?",
+];
 
 export function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -29,14 +35,21 @@ export function Chat() {
     },
   });
 
-  const handleSubmit = useCallback(() => {
-    const trimmed = input.trim();
-    if (!trimmed || mutation.isPending) return;
+  const submitMessage = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || mutation.isPending) return;
 
-    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
-    setInput("");
-    mutation.mutate({ message: trimmed, session_id: sessionId });
-  }, [input, mutation, sessionId]);
+      setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+      setInput("");
+      mutation.mutate({ message: trimmed, session_id: sessionId });
+    },
+    [mutation, sessionId]
+  );
+
+  const handleSubmit = useCallback(() => {
+    submitMessage(input);
+  }, [input, submitMessage]);
 
   const handleReset = useCallback(async () => {
     if (sessionId) await resetChat(sessionId);
@@ -64,9 +77,9 @@ export function Chat() {
   }, [input]);
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-dvh flex-col bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
+      <header className="flex items-center justify-between border-b border-border/50 px-6 py-4">
         <h1 className="text-sm font-medium tracking-tight text-foreground">
           County GIS Chat
         </h1>
@@ -84,7 +97,7 @@ export function Chat() {
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-2xl px-6">
           {messages.length === 0 ? (
-            <div className="flex h-[60vh] items-center justify-center">
+            <div className="flex h-[60vh] flex-col items-center justify-center">
               <div className="text-center">
                 <h2 className="text-lg font-medium tracking-tight text-foreground">
                   County GIS Assistant
@@ -92,6 +105,17 @@ export function Chat() {
                 <p className="mt-2 text-sm text-muted-foreground">
                   Ask questions about county zoning and GIS data.
                 </p>
+              </div>
+              <div className="mt-8 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => submitMessage(s)}
+                    className="rounded-lg border border-border/60 px-4 py-3 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
             </div>
           ) : (
@@ -127,10 +151,10 @@ export function Chat() {
                     <p className="text-xs font-medium text-muted-foreground mb-1.5">
                       Assistant
                     </p>
-                    <div className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50" />
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50 [animation-delay:150ms]" />
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50 [animation-delay:300ms]" />
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40" />
+                      <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
+                      <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
                     </div>
                   </div>
                 </div>
@@ -149,9 +173,9 @@ export function Chat() {
       </ScrollArea>
 
       {/* Input */}
-      <div className="border-t border-border px-6 py-4">
+      <div className="border-t border-border/50 px-6 py-4">
         <div className="mx-auto max-w-2xl">
-          <div className="flex items-end gap-3 rounded-xl border border-border bg-background px-4 py-3 focus-within:ring-1 focus-within:ring-ring">
+          <div className="relative flex items-end rounded-2xl border border-border bg-muted/30 transition-colors focus-within:border-foreground/20 focus-within:bg-background">
             <textarea
               ref={textareaRef}
               value={input}
@@ -159,18 +183,32 @@ export function Chat() {
               onKeyDown={handleKeyDown}
               placeholder="Ask a question..."
               rows={1}
-              className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="min-h-[48px] flex-1 resize-none bg-transparent px-4 py-3.5 text-sm leading-normal text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
             />
-            <Button
-              size="sm"
+            <button
               onClick={handleSubmit}
               disabled={!input.trim() || mutation.isPending}
-              className="h-8 rounded-lg px-3 text-xs"
+              className="m-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
+              aria-label="Send message"
             >
-              Send
-            </Button>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M8 12V4M8 4L4 8M8 4L12 8"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
           </div>
-          <p className="mt-2 text-center text-[11px] text-muted-foreground/60">
+          <p className="mt-2 text-center text-[11px] text-muted-foreground/50">
             Responses are generated from ingested county GIS data.
           </p>
         </div>
