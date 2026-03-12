@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { streamChat, resetChat } from "@/lib/api";
+import { Thinking, type ReasoningBlock } from "@/components/thinking";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  /** Raw streaming reasoning text (while reasoning is in progress) */
+  reasoningText?: string;
+  /** Parsed reasoning blocks (after reasoning completes) */
+  reasoning?: ReasoningBlock[];
 }
 
 const SUGGESTIONS = [
@@ -23,8 +28,11 @@ export function Chat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
+  const [toolStatus, setToolStatus] = useState<string[] | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const collapseScheduledRef = useRef(false);
 
   const submitMessage = useCallback(
     async (text: string) => {
@@ -34,6 +42,9 @@ export function Chat() {
       setError(null);
       setIsStreaming(true);
       setInput("");
+      collapseScheduledRef.current = false;
+      setIsThinkingExpanded(true);
+      setToolStatus(null);
 
       setMessages((prev) => [
         ...prev,
@@ -45,7 +56,41 @@ export function Chat() {
         { message: trimmed, session_id: sessionId },
         {
           onSessionId: (id) => setSessionId(id),
+          onReasoningDelta: (content) => {
+            setIsThinkingExpanded(true);
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last.role === "assistant") {
+                updated[updated.length - 1] = {
+                  ...last,
+                  reasoningText: (last.reasoningText || "") + content,
+                };
+              }
+              return updated;
+            });
+          },
+          onReasoningDone: (blocks) => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last.role === "assistant") {
+                updated[updated.length - 1] = {
+                  ...last,
+                  reasoningText: undefined,
+                  reasoning: [...(last.reasoning || []), ...blocks],
+                };
+              }
+              return updated;
+            });
+          },
+          onToolStatus: (tools) => setToolStatus(tools),
+          onToolStatusEnd: () => setToolStatus(null),
           onToken: (token) => {
+            if (!collapseScheduledRef.current) {
+              collapseScheduledRef.current = true;
+              setTimeout(() => setIsThinkingExpanded(false), 300);
+            }
             setMessages((prev) => {
               const updated = [...prev];
               const last = updated[updated.length - 1];
@@ -60,15 +105,24 @@ export function Chat() {
           },
           onDone: () => setIsStreaming(false),
           onError: (err) => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "assistant") {
+                updated[updated.length - 1] = {
+                  ...last,
+                  reasoning: undefined,
+                  reasoningText: undefined,
+                  content: "",
+                };
+              }
+              return updated.length > 0 &&
+                updated[updated.length - 1]?.content === ""
+                ? updated.slice(0, -1)
+                : updated;
+            });
             setError(err.message);
             setIsStreaming(false);
-            setMessages((prev) => {
-              // remove the empty assistant message
-              if (prev[prev.length - 1]?.content === "") {
-                return prev.slice(0, -1);
-              }
-              return prev;
-            });
           },
         }
       );
@@ -105,6 +159,10 @@ export function Chat() {
         Math.min(textareaRef.current.scrollHeight, 160) + "px";
     }
   }, [input]);
+
+  const hasThinking = (msg: Message) =>
+    (msg.reasoning && msg.reasoning.length > 0) ||
+    (msg.reasoningText && msg.reasoningText.length > 0);
 
   return (
     <div className="flex h-dvh flex-col bg-background">
@@ -167,12 +225,28 @@ export function Chat() {
                     <p className="text-xs font-medium text-muted-foreground mb-1.5">
                       {msg.role === "user" ? "You" : "Assistant"}
                     </p>
+                    {msg.role === "assistant" && hasThinking(msg) && (
+                      <div className="mt-3 mb-3">
+                        <Thinking
+                          streamingText={msg.reasoningText}
+                          blocks={msg.reasoning}
+                          toolStatus={i === messages.length - 1 ? toolStatus : null}
+                          expanded={i === messages.length - 1 ? isThinkingExpanded : false}
+                          onToggle={() => {
+                            if (i === messages.length - 1) {
+                              setIsThinkingExpanded((prev) => !prev);
+                            }
+                          }}
+                        />
+                      </div>
+                    )}
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-sm leading-relaxed [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:space-y-1 [&_ol]:space-y-1 [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_table]:text-sm [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border [&_th]:bg-muted">
                         {msg.content ? (
                           <ReactMarkdown>{msg.content}</ReactMarkdown>
                         ) : (
-                          isStreaming && (
+                          isStreaming &&
+                          !hasThinking(msg) && (
                             <div className="flex items-center gap-1.5 pt-1">
                               <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40" />
                               <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />

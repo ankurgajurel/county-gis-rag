@@ -52,8 +52,20 @@ async def chat(req: ChatRequest):
 
     async def event_stream():
         yield f"data: {json.dumps({'session_id': session_id})}\n\n"
-        async for token in engine.chat_stream(req.message):
-            yield f"data: {json.dumps({'token': token})}\n\n"
+        try:
+            async for event in engine.chat_stream(req.message):
+                if event["type"] == "reasoning_delta":
+                    yield f"data: {json.dumps({'reasoning_delta': event['content']})}\n\n"
+                elif event["type"] == "reasoning_done":
+                    yield f"data: {json.dumps({'reasoning_done': {'blocks': event['blocks']}})}\n\n"
+                elif event["type"] == "token":
+                    yield f"data: {json.dumps({'token': event['content']})}\n\n"
+                elif event["type"] == "tool_status":
+                    yield f"data: {json.dumps({'tool_status': {'tools': event['tools']}})}\n\n"
+                elif event["type"] == "tool_status_end":
+                    yield f"data: {json.dumps({'tool_status_end': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

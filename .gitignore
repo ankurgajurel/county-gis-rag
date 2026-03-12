@@ -4,3 +4,5 @@ doks/
 __pycache__/
 
 .venv/
+
+SPEC.md

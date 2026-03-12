@@ -10,6 +10,10 @@ export interface StreamCallbacks {
   onToken: (token: string) => void;
   onDone: () => void;
   onError: (error: Error) => void;
+  onReasoningDelta?: (content: string) => void;
+  onReasoningDone?: (blocks: { title: string; content: string }[]) => void;
+  onToolStatus?: (tools: string[]) => void;
+  onToolStatusEnd?: () => void;
 }
 
 export async function streamChat(req: ChatRequest, callbacks: StreamCallbacks) {
@@ -59,6 +63,21 @@ export async function streamChat(req: ChatRequest, callbacks: StreamCallbacks) {
         }
         if (parsed.token) {
           callbacks.onToken(parsed.token);
+        }
+        if (parsed.reasoning_delta !== undefined) {
+          callbacks.onReasoningDelta?.(parsed.reasoning_delta);
+        }
+        if (parsed.reasoning_done) {
+          callbacks.onReasoningDone?.(parsed.reasoning_done.blocks);
+        }
+        if (parsed.tool_status) {
+          callbacks.onToolStatus?.(parsed.tool_status.tools);
+        }
+        if (parsed.tool_status_end) {
+          callbacks.onToolStatusEnd?.();
+        }
+        if (parsed.error) {
+          callbacks.onError(new Error(parsed.error));
         }
       } catch {
         // skip malformed chunks
