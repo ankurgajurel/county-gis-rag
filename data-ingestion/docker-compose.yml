@@ -38,6 +38,8 @@ services:
       context: ../web
       dockerfile: Dockerfile
     container_name: county_gis_web
+    env_file:
+      - ../web/.env.local
     ports:
       - "3000:3000"
     environment:
