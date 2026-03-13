@@ -181,8 +181,8 @@ export function Chat() {
             </button>
           )}
           <button
-            onClick={() => {
-              document.cookie = "authenticated=; path=/; max-age=0";
+            onClick={async () => {
+              await fetch("/api/auth/logout", { method: "POST" });
               window.location.href = "/login";
             }}
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"

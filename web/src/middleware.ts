@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
   const isLoginPage = request.nextUrl.pathname === "/login";
-  const isAuthApi = request.nextUrl.pathname === "/api/auth";
+  const isAuthApi = request.nextUrl.pathname.startsWith("/api/auth");
   const authenticated = request.cookies.get("authenticated")?.value === "true";
 
   if (isAuthApi) return NextResponse.next();
