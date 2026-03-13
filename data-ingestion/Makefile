@@ -35,3 +35,7 @@ serve:
 
 clean:
 	docker compose down -v
+
+native-db-clean:
+	@DB_URL=$$(echo "$$DATABASE_URL" | sed 's|postgresql+asyncpg://|postgresql://|'); \
+	psql "$$DB_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
