@@ -5,6 +5,15 @@ from dataclasses import dataclass
 
 
 @dataclass
+class ZoningLayerConfig:
+    service_name: str
+    service_type: str = "MapServer"
+    layer_id: int = 0
+    zone_code_field: str = "ZONING"
+    zone_name_field: str | None = None
+
+
+@dataclass
 class CountyConfig:
     fips_code: str
     name: str
@@ -15,6 +24,7 @@ class CountyConfig:
     rate_limit: float = 5.0
     parcel_service: str | None = None  # e.g. "parcel_current_beta/FeatureServer/0"
     parcel_service_type: str = "FeatureServer"
+    zoning_layers: list[ZoningLayerConfig] | None = None
 
 
 class BaseProvider(ABC):

@@ -7,7 +7,7 @@
 
 ## P1 — High
 
-- [ ] Ingest zoning geometry layer from DuPage ArcGIS
+- [x] Ingest zoning geometry layer from DuPage ArcGIS
 - [ ] Add more filters to `filter_parcels` (bldg_sqft, township, zoning)
 
 ## P2 — Medium

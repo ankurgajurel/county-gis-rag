@@ -14,6 +14,7 @@ from src.db.models import (
     Municipality,
     Parcel,
     ZoningDistrict,
+    ZoningGeometry,
 )
 
 MAX_RESULTS = 20
@@ -248,6 +249,79 @@ async def get_zoning_info(
     }
 
 
+async def get_parcel_zoning(
+    pin: str | None = None,
+    address: str | None = None,
+    county: str | None = None,
+) -> dict:
+    """Find zoning designation for a parcel using spatial intersection with zoning geometries."""
+    if not pin and not address:
+        return {"error": "Provide either pin or address"}
+
+    async with async_session() as db:
+        q = select(Parcel).join(County, Parcel.county_id == County.id)
+        if pin:
+            q = q.where(Parcel.pin == pin)
+        if address:
+            q = q.where(Parcel.prop_address.ilike(f"%{address}%"))
+        if county:
+            q = q.where(County.name.ilike(f"%{county}%"))
+
+        q = q.limit(1)
+        parcel = (await db.execute(q)).scalar_one_or_none()
+
+        if not parcel:
+            return {"error": "Parcel not found"}
+        if parcel.geom is None:
+            return {"error": f"Parcel {parcel.pin} has no geometry"}
+
+        zq = select(
+            ZoningGeometry.zone_code,
+            ZoningGeometry.attributes,
+        ).where(
+            ST_Intersects(ZoningGeometry.geom, parcel.geom),
+            ZoningGeometry.county_id == parcel.county_id,
+        )
+
+        result = await db.execute(zq)
+        zones = result.mappings().all()
+
+        # Also look up zoning district details for matched codes
+        zone_details = []
+        for z in zones:
+            detail = {"zone_code": z["zone_code"], "attributes": z["attributes"]}
+
+            district = (await db.execute(
+                select(
+                    ZoningDistrict.code,
+                    ZoningDistrict.name,
+                    ZoningDistrict.category,
+                    ZoningDistrict.regulations,
+                    Municipality.name.label("municipality_name"),
+                )
+                .join(Municipality, ZoningDistrict.municipality_id == Municipality.id)
+                .where(ZoningDistrict.code.ilike(f"%{z['zone_code']}%"))
+                .limit(1)
+            )).mappings().first()
+
+            if district:
+                d = dict(district)
+                regs = d.get("regulations") or {}
+                detail["district"] = d
+                detail["permitted_uses"] = regs.get("permitted_uses", [])
+                detail["conditional_uses"] = regs.get("conditional_uses", [])
+                detail["special_uses"] = regs.get("special_uses", [])
+
+            zone_details.append(detail)
+
+    return {
+        "parcel_pin": parcel.pin,
+        "parcel_address": parcel.prop_address,
+        "zoning_results": zone_details,
+        "count": len(zone_details),
+    }
+
+
 async def list_available_layers(county: str | None = None) -> dict:
     from src.db.models import DataSource
 
@@ -357,6 +431,7 @@ TOOL_REGISTRY = {
     "spatial_query": spatial_query,
     "parcel_spatial_query": parcel_spatial_query,
     "get_zoning_info": get_zoning_info,
+    "get_parcel_zoning": get_parcel_zoning,
     "list_available_layers": list_available_layers,
     "query_gis_layer": query_gis_layer,
     "search_knowledge_base": search_knowledge_base,

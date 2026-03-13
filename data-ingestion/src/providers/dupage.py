@@ -1,6 +1,6 @@
 """DuPage County provider. FIPS 17043."""
 
-from src.providers.base import BaseProvider, CountyConfig
+from src.providers.base import BaseProvider, CountyConfig, ZoningLayerConfig
 
 
 class DuPageProvider(BaseProvider):
@@ -15,6 +15,14 @@ class DuPageProvider(BaseProvider):
             rate_limit=5.0,
             parcel_service="DuPage_County_IL/ParcelsWithRealEstateCC",
             parcel_service_type="FeatureServer",
+            zoning_layers=[
+                ZoningLayerConfig(
+                    service_name="Zoning/UnincorporatedZoningData",
+                    service_type="MapServer",
+                    layer_id=0,
+                    zone_code_field="ZONING",
+                ),
+            ],
         )
 
     def normalize_parcel(self, raw: dict) -> dict:

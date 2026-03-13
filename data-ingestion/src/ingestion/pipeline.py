@@ -16,10 +16,11 @@ from src.db.models import (
     GISFeature,
     IngestionRun,
     Parcel,
+    ZoningGeometry,
 )
 from src.discovery.crawler import ArcGISCrawler, save_discovered_layers
 from src.ingestion.fetcher import FeatureFetcher
-from src.ingestion.normalizer import normalize_gis_features, normalize_parcels
+from src.ingestion.normalizer import normalize_gis_features, normalize_parcels, _rings_to_wkt
 from src.providers.base import BaseProvider
 from src.utils.rate_limiter import RateLimiter
 
@@ -52,6 +53,11 @@ async def run_pipeline(provider: BaseProvider, full: bool = True):
         await _ingest_all_layers(
             session, rate_limiter, county_id, data_source_id, cfg
         )
+
+        if cfg.zoning_layers:
+            await _ingest_zoning_geometries(
+                session, rate_limiter, county_id, cfg
+            )
 
         from src.ingestion.zoning import ingest_municode_zoning
         await ingest_municode_zoning(session, cfg.fips_code, county_id)
@@ -326,6 +332,115 @@ async def _store_gis_features(rows: list[dict]) -> tuple[int, int]:
 
             except Exception as e:
                 logger.error("GIS feature batch %d-%d failed: %s", i, i + len(batch), e)
+                await db.rollback()
+                failed += len(batch)
+
+    return stored, failed
+
+
+async def _ingest_zoning_geometries(
+    session: aiohttp.ClientSession,
+    rate_limiter: RateLimiter,
+    county_id: int,
+    cfg,
+):
+    fetcher = FeatureFetcher(session, rate_limiter)
+
+    for zl in cfg.zoning_layers:
+        try:
+            query_url = (
+                f"{cfg.arcgis_base_url}/{zl.service_name}"
+                f"/{zl.service_type}/{zl.layer_id}/query"
+            )
+            logger.info(
+                "Fetching zoning geometries from %s/%s/%d",
+                zl.service_name, zl.service_type, zl.layer_id,
+            )
+
+            all_features = []
+            offset = 0
+            while True:
+                params = {
+                    "where": "1=1",
+                    "outFields": "*",
+                    "outSR": 4326,
+                    "f": "json",
+                    "resultOffset": offset,
+                    "resultRecordCount": 1000,
+                }
+                async with rate_limiter:
+                    async with session.get(
+                        query_url, params=params,
+                        timeout=aiohttp.ClientTimeout(total=120),
+                    ) as resp:
+                        resp.raise_for_status()
+                        data = await resp.json(content_type=None)
+
+                features = data.get("features", [])
+                if not features:
+                    break
+
+                all_features.extend(features)
+                offset += len(features)
+                logger.info(
+                    "Fetched %d zoning features (total: %d)",
+                    len(features), len(all_features),
+                )
+
+                if not data.get("exceededTransferLimit", False):
+                    break
+
+            rows = []
+            for feat in all_features:
+                attrs = feat.get("attributes", {})
+                geom = feat.get("geometry")
+                zone_code = str(attrs.get(zl.zone_code_field, "")).strip() or None
+
+                if not zone_code:
+                    continue
+
+                rows.append({
+                    "county_id": county_id,
+                    "zone_code": zone_code,
+                    "attributes": attrs,
+                    "geom": _rings_to_wkt(geom) if geom else None,
+                })
+
+            stored, failed = await _store_zoning_geometries(rows)
+            logger.info(
+                "Zoning geometry ingestion: %d stored, %d failed for %s",
+                stored, failed, zl.service_name,
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed zoning geometry ingestion for %s: %s",
+                zl.service_name, e,
+            )
+
+
+async def _store_zoning_geometries(rows: list[dict]) -> tuple[int, int]:
+    stored = 0
+    failed = 0
+
+    for i in range(0, len(rows), BATCH_SIZE):
+        batch = rows[i : i + BATCH_SIZE]
+
+        async with async_session() as db:
+            try:
+                for row in batch:
+                    wkt = row.pop("geom", None)
+                    geom_elem = WKTElement(wkt, srid=4326) if wkt else None
+                    db.add(ZoningGeometry(**row, geom=geom_elem))
+
+                await db.commit()
+                stored += len(batch)
+
+            except Exception as e:
+                logger.error(
+                    "Zoning geometry batch %d-%d failed: %s",
+                    i, i + len(batch), e,
+                )
                 await db.rollback()
                 failed += len(batch)
 

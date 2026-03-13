@@ -143,6 +143,28 @@ TOOL_SCHEMAS = [
     },
     {
         "type": "function",
+        "name": "get_parcel_zoning",
+        "description": "Find the zoning designation for a parcel by spatially intersecting it with zoning boundary geometries. Returns the zone code, regulations, and permitted/conditional/special uses. Use this to answer 'what is the zoning for [address]?' or 'what uses are allowed at [PIN]?'",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pin": {
+                    "type": "string",
+                    "description": "Parcel identification number",
+                },
+                "address": {
+                    "type": "string",
+                    "description": "Street address to search for",
+                },
+                "county": {
+                    "type": "string",
+                    "description": "County name to filter by",
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
         "name": "list_available_layers",
         "description": "List all available GIS data layers with their names, geometry types, and feature counts. Use this to discover what data is available before querying specific layers.",
         "parameters": {
