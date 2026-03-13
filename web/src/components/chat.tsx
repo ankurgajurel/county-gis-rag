@@ -171,14 +171,25 @@ export function Chat() {
         <h1 className="text-sm font-medium tracking-tight text-foreground">
           County GIS Chat
         </h1>
-        {messages.length > 0 && (
+        <div className="flex items-center gap-4">
+          {messages.length > 0 && (
+            <button
+              onClick={handleReset}
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              New chat
+            </button>
+          )}
           <button
-            onClick={handleReset}
+            onClick={() => {
+              document.cookie = "authenticated=; path=/; max-age=0";
+              window.location.href = "/login";
+            }}
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            New chat
+            Logout
           </button>
-        )}
+        </div>
       </header>
 
       {/* Messages */}

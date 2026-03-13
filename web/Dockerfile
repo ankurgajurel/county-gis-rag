@@ -20,6 +20,7 @@ FROM --platform=linux/amd64 node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV PASSCODE=""
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs

@@ -40,6 +40,8 @@ services:
     container_name: county_gis_web
     ports:
       - "3000:3000"
+    environment:
+      - PASSCODE=${PASSCODE}
     depends_on:
       - app
 
