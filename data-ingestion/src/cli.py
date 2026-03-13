@@ -17,6 +17,10 @@ def main():
 
     ingest_cmd = sub.add_parser("ingest", help="Run full ingestion pipeline")
     ingest_cmd.add_argument("county", help="County name or FIPS code")
+    ingest_cmd.add_argument(
+        "--incremental", action="store_true",
+        help="Only fetch new records since last ingestion (uses OID watermark)",
+    )
 
     zoning_cmd = sub.add_parser("zoning", help="Ingest zoning data only")
     zoning_cmd.add_argument("county", help="County name or FIPS code")
@@ -60,7 +64,8 @@ def main():
     if args.command == "discover":
         asyncio.run(_discover(provider))
     elif args.command == "ingest":
-        asyncio.run(_ingest(provider))
+        full = not getattr(args, "incremental", False)
+        asyncio.run(_ingest(provider, full=full))
     elif args.command == "zoning":
         asyncio.run(_zoning(provider))
 
@@ -91,9 +96,9 @@ async def _discover(provider):
             print(f"  {layer.service_name}/{layer.service_type}/{layer.layer_id}: {layer.layer_name}{count}")
 
 
-async def _ingest(provider):
+async def _ingest(provider, full: bool = True):
     from src.ingestion.pipeline import run_pipeline
-    await run_pipeline(provider)
+    await run_pipeline(provider, full=full)
 
 
 async def _zoning(provider):

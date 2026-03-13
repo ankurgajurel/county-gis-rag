@@ -31,7 +31,8 @@ BATCH_SIZE = 500
 
 async def run_pipeline(provider: BaseProvider, full: bool = True):
     cfg = provider.config()
-    logger.info("Starting pipeline for %s (full=%s)", cfg.name, full)
+    mode = "full" if full else "incremental"
+    logger.info("Starting pipeline for %s (mode=%s)", cfg.name, mode)
 
     rate_limiter = RateLimiter(rate=cfg.rate_limit, burst=int(cfg.rate_limit * 2))
 
@@ -47,11 +48,13 @@ async def run_pipeline(provider: BaseProvider, full: bool = True):
 
         if cfg.parcel_service:
             await _ingest_parcels(
-                session, rate_limiter, provider, county_id, data_source_id
+                session, rate_limiter, provider, county_id, data_source_id,
+                full=full,
             )
 
         await _ingest_all_layers(
-            session, rate_limiter, county_id, data_source_id, cfg
+            session, rate_limiter, county_id, data_source_id, cfg,
+            full=full,
         )
 
         if cfg.zoning_layers:
@@ -113,6 +116,7 @@ async def _ingest_parcels(
     provider: BaseProvider,
     county_id: int,
     data_source_id: int,
+    full: bool = True,
 ):
     cfg = provider.config()
     service_name = cfg.parcel_service
@@ -132,10 +136,13 @@ async def _ingest_parcels(
             logger.error("Parcel layer not found in discovered layers for %s", cfg.name)
             return
 
+        last_max_oid = layer.last_max_oid
+        run_type = "full" if full or not last_max_oid else "incremental"
+
         run = IngestionRun(
             county_id=county_id,
             layer_id=layer.id,
-            run_type="full",
+            run_type=run_type,
             status="running",
         )
         db.add(run)
@@ -146,21 +153,42 @@ async def _ingest_parcels(
 
     try:
         fetcher = FeatureFetcher(session, rate_limiter)
-        features = await fetcher.fetch_all(
-            cfg.arcgis_base_url,
-            service_name,
-            service_type,
-            layer_id=0,
-            max_record_count=max_record_count,
-        )
 
-        logger.info("Fetched %d parcel features for %s", len(features), cfg.name)
+        if run_type == "incremental":
+            logger.info(
+                "Incremental parcel ingestion for %s (OID > %d)",
+                cfg.name, last_max_oid,
+            )
+            features = await fetcher.fetch_incremental(
+                cfg.arcgis_base_url,
+                service_name,
+                service_type,
+                layer_id=0,
+                last_oid=last_max_oid,
+                max_record_count=max_record_count,
+            )
+        else:
+            features = await fetcher.fetch_all(
+                cfg.arcgis_base_url,
+                service_name,
+                service_type,
+                layer_id=0,
+                max_record_count=max_record_count,
+            )
+
+        logger.info(
+            "Fetched %d parcel features for %s (%s)",
+            len(features), cfg.name, run_type,
+        )
 
         rows = normalize_parcels(
             provider, features, county_id, source_layer_id, run_id
         )
 
         stored, failed = await _store_parcels(rows)
+
+        # Track the max OBJECTID we've seen
+        new_max_oid = _extract_max_oid(features, last_max_oid)
 
         async with async_session() as db:
             await db.execute(
@@ -174,16 +202,19 @@ async def _ingest_parcels(
                     completed_at=datetime.now(timezone.utc),
                 )
             )
+            update_vals = {"last_ingested_at": datetime.now(timezone.utc)}
+            if new_max_oid is not None:
+                update_vals["last_max_oid"] = new_max_oid
             await db.execute(
                 update(DiscoveredLayer)
                 .where(DiscoveredLayer.id == source_layer_id)
-                .values(last_ingested_at=datetime.now(timezone.utc))
+                .values(**update_vals)
             )
             await db.commit()
 
         logger.info(
-            "Parcel ingestion done: fetched=%d stored=%d failed=%d",
-            len(features), stored, failed,
+            "Parcel ingestion done (%s): fetched=%d stored=%d failed=%d max_oid=%s",
+            run_type, len(features), stored, failed, new_max_oid,
         )
 
     except Exception as e:
@@ -211,6 +242,7 @@ async def _ingest_all_layers(
     county_id: int,
     data_source_id: int,
     cfg,
+    full: bool = True,
 ):
     async with async_session() as db:
         result = await db.execute(
@@ -245,16 +277,33 @@ async def _ingest_all_layers(
         if not layer.geometry_type:
             continue
 
-        try:
-            run = await _create_run(county_id, layer.id, "full")
+        use_incremental = not full and layer.last_max_oid is not None
+        run_type = "incremental" if use_incremental else "full"
 
-            features = await fetcher.fetch_all(
-                cfg.arcgis_base_url,
-                layer.service_name,
-                layer.service_type,
-                layer.layer_id,
-                max_record_count=layer.max_record_count or 1000,
-            )
+        try:
+            run = await _create_run(county_id, layer.id, run_type)
+
+            if use_incremental:
+                logger.info(
+                    "Incremental fetch for %s/%d (OID > %d)",
+                    layer.service_name, layer.layer_id, layer.last_max_oid,
+                )
+                features = await fetcher.fetch_incremental(
+                    cfg.arcgis_base_url,
+                    layer.service_name,
+                    layer.service_type,
+                    layer.layer_id,
+                    last_oid=layer.last_max_oid,
+                    max_record_count=layer.max_record_count or 1000,
+                )
+            else:
+                features = await fetcher.fetch_all(
+                    cfg.arcgis_base_url,
+                    layer.service_name,
+                    layer.service_type,
+                    layer.layer_id,
+                    max_record_count=layer.max_record_count or 1000,
+                )
 
             if not features:
                 await _finish_run(run, 0, 0, 0)
@@ -267,9 +316,23 @@ async def _ingest_all_layers(
             stored, failed = await _store_gis_features(rows)
             await _finish_run(run, len(features), stored, failed)
 
+            # Update the OID watermark
+            new_max_oid = _extract_max_oid(features, layer.last_max_oid)
+            async with async_session() as db:
+                update_vals = {"last_ingested_at": datetime.now(timezone.utc)}
+                if new_max_oid is not None:
+                    update_vals["last_max_oid"] = new_max_oid
+                await db.execute(
+                    update(DiscoveredLayer)
+                    .where(DiscoveredLayer.id == layer.id)
+                    .values(**update_vals)
+                )
+                await db.commit()
+
             logger.info(
-                "Ingested %s/%s/%d: %d features stored",
-                layer.service_name, layer.service_type, layer.layer_id, stored,
+                "Ingested %s/%s/%d (%s): %d features stored",
+                layer.service_name, layer.service_type, layer.layer_id,
+                run_type, stored,
             )
             ingested += 1
 
@@ -311,6 +374,19 @@ async def _finish_run(
             )
         )
         await db.commit()
+
+
+def _extract_max_oid(features: list[dict], current_max: int | None = None) -> int | None:
+    """Extract the highest OBJECTID from a batch of features."""
+    max_oid = current_max
+    for feat in features:
+        attrs = feat.get("attributes", {})
+        oid = attrs.get("OBJECTID") or attrs.get("objectid") or attrs.get("FID")
+        if oid is not None:
+            oid = int(oid)
+            if max_oid is None or oid > max_oid:
+                max_oid = oid
+    return max_oid
 
 
 async def _store_gis_features(rows: list[dict]) -> tuple[int, int]:

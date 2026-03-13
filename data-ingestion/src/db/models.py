@@ -75,6 +75,7 @@ class DiscoveredLayer(Base):
     is_queryable: Mapped[bool] = mapped_column(Boolean, default=True)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_max_oid: Mapped[int | None] = mapped_column(BigInteger)
 
     data_source: Mapped["DataSource"] = relationship(back_populates="discovered_layers")
 
