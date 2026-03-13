@@ -233,9 +233,18 @@ async def get_zoning_info(
         result = await db.execute(q)
         rows = result.mappings().all()
 
+    results = []
+    for r in rows:
+        entry = dict(r)
+        regs = entry.get("regulations") or {}
+        entry["permitted_uses"] = regs.get("permitted_uses", [])
+        entry["conditional_uses"] = regs.get("conditional_uses", [])
+        entry["special_uses"] = regs.get("special_uses", [])
+        results.append(entry)
+
     return {
-        "results": [dict(r) for r in rows],
-        "count": len(rows),
+        "results": results,
+        "count": len(results),
     }
 
 

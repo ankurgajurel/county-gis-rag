@@ -121,7 +121,7 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "name": "get_zoning_info",
-        "description": "Look up zoning district information including regulations (setbacks, height limits, lot size requirements, floor area ratio). Search by municipality, district code, or category.",
+        "description": "Look up zoning district information including regulations (setbacks, height limits, lot size, FAR) and permitted/conditional/special uses. Use this to answer questions like 'what uses are allowed in R-3 zoning' or 'what are the setbacks in Naperville B2 district'.",
         "parameters": {
             "type": "object",
             "properties": {

@@ -350,4 +350,84 @@ def _extract_regulations(text: str) -> dict | None:
     if far:
         regs["floor_area_ratio"] = float(far.group(1))
 
+    permitted = _extract_uses(text, "permitted")
+    if permitted:
+        regs["permitted_uses"] = permitted
+
+    conditional = _extract_uses(text, "conditional")
+    if conditional:
+        regs["conditional_uses"] = conditional
+
+    special = _extract_uses(text, "special")
+    if special:
+        regs["special_uses"] = special
+
     return regs if regs else None
+
+
+def _extract_uses(text: str, use_type: str) -> list[str]:
+    """Extract permitted, conditional, or special uses from ordinance text."""
+    uses = []
+
+    # Match sections like "Permitted uses:", "Conditional uses:", "Special uses:"
+    # and collect the list items that follow
+    patterns = [
+        # "Permitted uses" / "Uses permitted" / "Permitted principal uses"
+        rf"(?:{use_type}\s+(?:principal\s+)?uses|uses\s+{use_type}(?:\s+by\s+right)?)\s*[:\.\-]?\s*(.{{1,3000}}?)(?=(?:conditional|special|prohibited|{_next_section_boundary()})\s+uses|\Z)",
+        # "Uses allowed as of right" (for permitted)
+        rf"{use_type}\s+(?:as\s+of\s+right|by\s+right)\s*[:\.\-]?\s*(.{{1,3000}}?)(?=(?:conditional|special|prohibited|{_next_section_boundary()})\s+uses|\Z)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if match:
+            block = match.group(1)
+            uses = _parse_use_items(block)
+            if uses:
+                break
+
+    return uses
+
+
+def _next_section_boundary() -> str:
+    """Regex fragment for section boundaries that terminate a use list."""
+    return r"(?:accessory|bulk|area|density|height|setback|yard|lot|parking|sign|development\s+standard)"
+
+
+def _parse_use_items(block: str) -> list[str]:
+    """Parse individual use items from a text block."""
+    items = []
+
+    # Try numbered/lettered list items: (1), (a), 1., a., (i), etc.
+    list_items = re.findall(
+        r"(?:(?:\(?\d+[.\)]\s*)|(?:\(?[a-z][.\)]\s*)|(?:\(?[ivx]+[.\)]\s*)|(?:[-•]\s*))([^\n(]+?)(?=\s*(?:\(?\d+[.\)]|\(?[a-z][.\)]|\(?[ivx]+[.\)]|[-•]|\Z))",
+        block,
+        re.IGNORECASE,
+    )
+
+    if list_items:
+        for item in list_items:
+            cleaned = _clean_use_item(item)
+            if cleaned:
+                items.append(cleaned)
+    else:
+        # Fallback: split on common delimiters (semicolons, periods followed by caps)
+        parts = re.split(r"[;]|\.\s+(?=[A-Z])", block)
+        for part in parts:
+            cleaned = _clean_use_item(part)
+            if cleaned:
+                items.append(cleaned)
+
+    return items
+
+
+def _clean_use_item(item: str) -> str | None:
+    """Clean and validate a single use item."""
+    item = re.sub(r"\s+", " ", item).strip().rstrip(".,;:")
+    # Skip items that are too short or too long to be meaningful use names
+    if len(item) < 4 or len(item) > 200:
+        return None
+    # Skip items that look like section references or boilerplate
+    if re.match(r"^(?:see\s+|subject\s+to\s+|provided\s+that|in\s+accordance)", item, re.IGNORECASE):
+        return None
+    return item
