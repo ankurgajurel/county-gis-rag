@@ -1,22 +1,22 @@
 services:
-  db:
-    build:
-      context: .
-      dockerfile: Dockerfile.db
-    container_name: county_gis_db
-    environment:
-      POSTGRES_DB: county_gis
-      POSTGRES_USER: gis_user
-      POSTGRES_PASSWORD: gis_password
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gis_user -d county_gis"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # db:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.db
+  #   container_name: county_gis_db
+  #   environment:
+  #     POSTGRES_DB: county_gis
+  #     POSTGRES_USER: gis_user
+  #     POSTGRES_PASSWORD: gis_password
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U gis_user -d county_gis"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
   app:
     build:
@@ -27,9 +27,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    depends_on:
-      db:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
 
   web:
     build:
@@ -41,16 +43,16 @@ services:
     depends_on:
       - app
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: county_gis_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@local.dev
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
-    depends_on:
-      - db
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: county_gis_pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@local.dev
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "5050:80"
+  #   depends_on:
+  #     - db
 
-volumes:
-  pgdata:
+# volumes:
+#   pgdata:

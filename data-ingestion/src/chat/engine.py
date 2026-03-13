@@ -77,12 +77,23 @@ class ChatEngine:
                         yield {"type": "reasoning_done", "blocks": blocks}
                         reasoning_buffer = ""
 
+                elif event.type == "response.output_item.added":
+                    if event.item.type == "function_call":
+                        function_calls[event.item.id] = {
+                            "name": event.item.name,
+                            "call_id": event.item.call_id,
+                            "arguments": "",
+                        }
+
                 elif event.type == "response.function_call_arguments.done":
                     has_function_calls = True
-                    function_calls[event.item_id] = {
-                        "name": event.name,
-                        "arguments": event.arguments,
-                    }
+                    if event.item_id in function_calls:
+                        function_calls[event.item_id]["arguments"] = event.arguments
+                    else:
+                        function_calls[event.item_id] = {
+                            "name": getattr(event, "name", None),
+                            "arguments": event.arguments,
+                        }
 
                 elif event.type == "response.output_text.delta":
                     full_text += event.delta
@@ -96,11 +107,11 @@ class ChatEngine:
                 yield {"type": "tool_status", "tools": tool_names}
 
                 tool_outputs = []
-                for call_id, fc in function_calls.items():
+                for item_id, fc in function_calls.items():
                     result = await self._execute_tool_by_name(fc["name"], fc["arguments"])
                     tool_outputs.append({
                         "type": "function_call_output",
-                        "call_id": call_id,
+                        "call_id": fc.get("call_id", item_id),
                         "output": json.dumps(result, default=str),
                     })
 
