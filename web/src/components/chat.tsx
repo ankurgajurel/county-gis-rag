@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { streamChat, resetChat } from "@/lib/api";
 import { Thinking, type ReasoningBlock } from "@/components/thinking";
+import { MapPanel } from "@/components/map-panel";
 
 interface Message {
   role: "user" | "assistant";
@@ -30,6 +31,8 @@ export function Chat() {
   const [error, setError] = useState<string | null>(null);
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
   const [toolStatus, setToolStatus] = useState<string[] | null>(null);
+  const [mapGeojson, setMapGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
+  const showMap = mapGeojson !== null && (mapGeojson.features?.length ?? 0) > 0;
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const collapseScheduledRef = useRef(false);
@@ -86,6 +89,7 @@ export function Chat() {
           },
           onToolStatus: (tools) => setToolStatus(tools),
           onToolStatusEnd: () => setToolStatus(null),
+          onMapData: (geojson) => setMapGeojson(geojson),
           onToken: (token) => {
             if (!collapseScheduledRef.current) {
               collapseScheduledRef.current = true;
@@ -139,7 +143,22 @@ export function Chat() {
     setMessages([]);
     setSessionId(null);
     setError(null);
+    setMapGeojson(null);
   }, [sessionId]);
+
+  const handleFeatureClick = useCallback(
+    (properties: Record<string, unknown>) => {
+      if (properties.pin) {
+        setInput(`Tell me about parcel ${properties.pin}`);
+      } else if (properties.layer_name && properties.feature_id) {
+        setInput(
+          `What is ${properties.layer_name} feature ${properties.feature_id}?`
+        );
+      }
+      textareaRef.current?.focus();
+    },
+    []
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -192,99 +211,114 @@ export function Chat() {
         </div>
       </header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-6">
-          {messages.length === 0 ? (
-            <div className="flex h-[60vh] flex-col items-center justify-center">
-              <div className="text-center">
-                <h2 className="text-lg font-medium tracking-tight text-foreground">
-                  County GIS Assistant
-                </h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Ask questions about county zoning and GIS data.
-                </p>
+      {/* Messages + Map */}
+      <div className="flex flex-1 overflow-hidden">
+        <div className={`flex-1 overflow-y-auto transition-all duration-300`}>
+          <div className={`mx-auto px-6 ${showMap ? "max-w-xl" : "max-w-2xl"}`}>
+            {messages.length === 0 ? (
+              <div className="flex h-[60vh] flex-col items-center justify-center">
+                <div className="text-center">
+                  <h2 className="text-lg font-medium tracking-tight text-foreground">
+                    County GIS Assistant
+                  </h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Ask questions about county zoning and GIS data.
+                  </p>
+                </div>
+                <div className="mt-8 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
+                  {SUGGESTIONS.map((s, i) => (
+                    <button
+                      key={s}
+                      onClick={() => submitMessage(s)}
+                      className={`rounded-lg border border-border/60 px-4 py-3 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground ${
+                        i === SUGGESTIONS.length - 1 ? "sm:col-span-2 sm:mx-auto sm:w-fit sm:text-center" : ""
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="mt-8 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
-                {SUGGESTIONS.map((s, i) => (
-                  <button
-                    key={s}
-                    onClick={() => submitMessage(s)}
-                    className={`rounded-lg border border-border/60 px-4 py-3 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground ${
-                      i === SUGGESTIONS.length - 1 ? "sm:col-span-2 sm:mx-auto sm:w-fit sm:text-center" : ""
-                    }`}
-                  >
-                    {s}
-                  </button>
+            ) : (
+              <div className="py-8 space-y-6">
+                {messages.map((msg, i) => (
+                  <div key={i} className="flex gap-4">
+                    <div
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+                        msg.role === "user"
+                          ? "bg-foreground text-background"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {msg.role === "user" ? "Y" : "A"}
+                    </div>
+                    <div className="min-w-0 pt-0.5">
+                      <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                        {msg.role === "user" ? "You" : "Assistant"}
+                      </p>
+                      {msg.role === "assistant" && hasThinking(msg) && (
+                        <div className="mt-3 mb-3">
+                          <Thinking
+                            streamingText={msg.reasoningText}
+                            blocks={msg.reasoning}
+                            toolStatus={i === messages.length - 1 ? toolStatus : null}
+                            expanded={i === messages.length - 1 ? isThinkingExpanded : false}
+                            onToggle={() => {
+                              if (i === messages.length - 1) {
+                                setIsThinkingExpanded((prev) => !prev);
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                      {msg.role === "assistant" ? (
+                        <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-sm leading-relaxed [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:space-y-1 [&_ol]:space-y-1 [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_table]:text-sm [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border [&_th]:bg-muted">
+                          {msg.content ? (
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          ) : (
+                            isStreaming &&
+                            !hasThinking(msg) && (
+                              <div className="flex items-center gap-1.5 pt-1">
+                                <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40" />
+                                <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
+                                <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
+                              </div>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                          {msg.content}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ))}
+
+                {error && (
+                  <div className="ml-11 text-sm text-destructive">
+                    Failed to send message. Please try again.
+                  </div>
+                )}
+
+                <div ref={bottomRef} />
               </div>
-            </div>
-          ) : (
-            <div className="py-8 space-y-6">
-              {messages.map((msg, i) => (
-                <div key={i} className="flex gap-4">
-                  <div
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-                      msg.role === "user"
-                        ? "bg-foreground text-background"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {msg.role === "user" ? "Y" : "A"}
-                  </div>
-                  <div className="min-w-0 pt-0.5">
-                    <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                      {msg.role === "user" ? "You" : "Assistant"}
-                    </p>
-                    {msg.role === "assistant" && hasThinking(msg) && (
-                      <div className="mt-3 mb-3">
-                        <Thinking
-                          streamingText={msg.reasoningText}
-                          blocks={msg.reasoning}
-                          toolStatus={i === messages.length - 1 ? toolStatus : null}
-                          expanded={i === messages.length - 1 ? isThinkingExpanded : false}
-                          onToggle={() => {
-                            if (i === messages.length - 1) {
-                              setIsThinkingExpanded((prev) => !prev);
-                            }
-                          }}
-                        />
-                      </div>
-                    )}
-                    {msg.role === "assistant" ? (
-                      <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-sm leading-relaxed [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:space-y-1 [&_ol]:space-y-1 [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_table]:text-sm [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border [&_th]:bg-muted">
-                        {msg.content ? (
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        ) : (
-                          isStreaming &&
-                          !hasThinking(msg) && (
-                            <div className="flex items-center gap-1.5 pt-1">
-                              <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40" />
-                              <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
-                              <span className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
-                            </div>
-                          )
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
-                        {msg.content}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {error && (
-                <div className="ml-11 text-sm text-destructive">
-                  Failed to send message. Please try again.
-                </div>
-              )}
-
-              <div ref={bottomRef} />
-            </div>
-          )}
+            )}
+          </div>
         </div>
+
+        {showMap && (
+          <div
+            className="border-l border-border/50"
+            style={{ width: "50%", flexShrink: 0 }}
+          >
+            <MapPanel
+              geojson={mapGeojson}
+              onFeatureClick={handleFeatureClick}
+              onClose={() => setMapGeojson(null)}
+            />
+          </div>
+        )}
       </div>
 
       {/* Input — sticky bottom */}

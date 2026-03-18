@@ -14,6 +14,7 @@ export interface StreamCallbacks {
   onReasoningDone?: (blocks: { title: string; content: string }[]) => void;
   onToolStatus?: (tools: string[]) => void;
   onToolStatusEnd?: () => void;
+  onMapData?: (geojson: GeoJSON.FeatureCollection) => void;
 }
 
 export async function streamChat(req: ChatRequest, callbacks: StreamCallbacks) {
@@ -75,6 +76,9 @@ export async function streamChat(req: ChatRequest, callbacks: StreamCallbacks) {
         }
         if (parsed.tool_status_end) {
           callbacks.onToolStatusEnd?.();
+        }
+        if (parsed.map_data) {
+          callbacks.onMapData?.(parsed.map_data);
         }
         if (parsed.error) {
           callbacks.onError(new Error(parsed.error));
