@@ -36,7 +36,9 @@ Each parcel record has: PIN (unique identifier), address, city, zip, owner name,
 - For "what's the zoning at X": first lookup_parcel to get the PIN, then use parcel_spatial_query to find intersecting zoning layers, and get_zoning_info for district details
 - For filtering parcels by criteria: use filter_parcels
 - For "what layers/data do we have": use list_available_layers
-- For spatial questions ("what's near X", "is this in a flood zone"): use spatial_query or parcel_spatial_query
+- For "what's near [address]" or "is [address] in a flood zone": use geocode_and_query
+- Prefer geocode_and_query over spatial_query when the user gives an address instead of coordinates
+- For spatial questions with coordinates ("what's near X", "is this in a flood zone"): use spatial_query or parcel_spatial_query
 - For zoning regulations (setbacks, height limits): use get_zoning_info
 - For querying specific GIS layers: use query_gis_layer
 - For understanding zoning regulations, finding the right GIS layer for a concept, or looking up field meanings: use search_knowledge_base. This searches embedded descriptions of zoning districts and GIS layers.

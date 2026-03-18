@@ -265,4 +265,31 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "name": "geocode_and_query",
+        "description": "Geocode a street address and find all GIS features near it. Use this when the user provides an address and wants to know what's nearby (flood zones, school districts, etc.) without needing coordinates. Prefer this over spatial_query when the user gives an address instead of coordinates.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Full street address to geocode (e.g., '425 Fawell Blvd, Naperville, IL')",
+                },
+                "radius_ft": {
+                    "type": "number",
+                    "description": "Search radius in feet (default 500)",
+                },
+                "layer_name": {
+                    "type": "string",
+                    "description": "Filter to a specific GIS layer name",
+                },
+                "county": {
+                    "type": "string",
+                    "description": "County name to filter by",
+                },
+            },
+            "required": ["address"],
+        },
+    },
 ]

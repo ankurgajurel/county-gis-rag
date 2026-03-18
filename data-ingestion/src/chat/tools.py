@@ -1,7 +1,9 @@
 """Tool functions that query PostGIS. Each returns a dict suitable for LLM consumption."""
 
 import json as _json
+import logging
 
+import aiohttp
 from openai import AsyncOpenAI
 from sqlalchemy import select, func, text, cast, String
 from geoalchemy2.functions import ST_AsText, ST_DWithin, ST_Intersects, ST_Transform
@@ -18,6 +20,8 @@ from src.db.models import (
     ZoningDistrict,
     ZoningGeometry,
 )
+
+logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 20
 MAX_GEOJSON_FEATURES = 50
@@ -458,6 +462,61 @@ async def search_knowledge_base(query: str, top_k: int = 5) -> dict:
     }
 
 
+async def geocode_address(address: str) -> dict | None:
+    """Geocode using US Census Bureau geocoder (free, no API key)."""
+    url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+    params = {
+        "address": address,
+        "benchmark": "Public_AR_Current",
+        "format": "json",
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, params=params, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                matches = data.get("result", {}).get("addressMatches", [])
+                if not matches:
+                    return None
+                match = matches[0]
+                coords = match["coordinates"]
+                return {
+                    "lat": coords["y"],
+                    "lon": coords["x"],
+                    "matched_address": match["matchedAddress"],
+                }
+    except Exception as e:
+        logger.warning("Geocoding failed for '%s': %s", address, e)
+        return None
+
+
+async def geocode_and_query(
+    address: str,
+    radius_ft: float = 500,
+    layer_name: str | None = None,
+    county: str | None = None,
+) -> dict:
+    """Geocode an address, then find nearby GIS features."""
+    geo = await geocode_address(address)
+    if not geo:
+        return {"error": f"Could not geocode address: {address}"}
+
+    results = await spatial_query(
+        lat=geo["lat"],
+        lon=geo["lon"],
+        radius_ft=radius_ft,
+        layer_name=layer_name,
+        county=county,
+    )
+
+    results["geocoded_address"] = geo["matched_address"]
+    results["coordinates"] = {"lat": geo["lat"], "lon": geo["lon"]}
+    return results
+
+
 def _build_feature_collection(features: list[dict]) -> dict:
     """Build a GeoJSON FeatureCollection with bounding box."""
     coords: list[tuple[float, float]] = []
@@ -658,4 +717,5 @@ TOOL_REGISTRY = {
     "query_gis_layer": query_gis_layer,
     "search_knowledge_base": search_knowledge_base,
     "get_geometry": get_geometry,
+    "geocode_and_query": geocode_and_query,
 }
