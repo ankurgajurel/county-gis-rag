@@ -706,6 +706,58 @@ async def get_geometry(
     return _build_feature_collection(features)
 
 
+async def compare_zoning(
+    municipalities: list[str],
+    category: str | None = None,
+    codes: list[str] | None = None,
+) -> dict:
+    """Compare zoning regulations across DuPage County municipalities side by side."""
+    async with async_session() as db:
+        q = select(
+            ZoningDistrict.code,
+            ZoningDistrict.name,
+            ZoningDistrict.category,
+            ZoningDistrict.regulations,
+            Municipality.name.label("municipality_name"),
+        ).join(Municipality, ZoningDistrict.municipality_id == Municipality.id)
+
+        if municipalities:
+            q = q.where(Municipality.name.in_([m.strip() for m in municipalities]))
+        if category:
+            q = q.where(ZoningDistrict.category == category)
+        if codes:
+            q = q.where(ZoningDistrict.code.in_(codes))
+
+        q = q.order_by(Municipality.name, ZoningDistrict.code)
+        result = await db.execute(q)
+        rows = result.mappings().all()
+
+    by_municipality: dict[str, list[dict]] = {}
+    for r in rows:
+        muni = r["municipality_name"]
+        if muni not in by_municipality:
+            by_municipality[muni] = []
+
+        regs = r["regulations"] or {}
+        by_municipality[muni].append({
+            "code": r["code"],
+            "name": r["name"],
+            "category": r["category"],
+            "min_lot_size_sqft": regs.get("min_lot_size_sqft"),
+            "max_height_ft": regs.get("max_height_ft"),
+            "front_setback_ft": regs.get("front_setback_ft"),
+            "side_setback_ft": regs.get("side_setback_ft"),
+            "rear_setback_ft": regs.get("rear_setback_ft"),
+            "floor_area_ratio": regs.get("floor_area_ratio"),
+        })
+
+    return {
+        "comparison": by_municipality,
+        "municipalities_found": list(by_municipality.keys()),
+        "total_districts": sum(len(v) for v in by_municipality.values()),
+    }
+
+
 TOOL_REGISTRY = {
     "lookup_parcel": lookup_parcel,
     "filter_parcels": filter_parcels,
@@ -718,4 +770,5 @@ TOOL_REGISTRY = {
     "search_knowledge_base": search_knowledge_base,
     "get_geometry": get_geometry,
     "geocode_and_query": geocode_and_query,
+    "compare_zoning": compare_zoning,
 }

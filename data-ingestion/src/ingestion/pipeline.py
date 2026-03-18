@@ -1,5 +1,6 @@
 """Ingestion orchestrator: discover → fetch → normalize → store."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -234,6 +235,7 @@ async def _ingest_parcels(
 
 
 MAX_FEATURES_PER_LAYER = 500_000
+MAX_CONCURRENT_LAYERS = 5
 
 
 async def _ingest_all_layers(
@@ -253,34 +255,24 @@ async def _ingest_all_layers(
         all_layers = result.scalars().all()
 
     parcel_svc = cfg.parcel_service or ""
-    fetcher = FeatureFetcher(session, rate_limiter)
 
-    ingested = 0
-    skipped = 0
+    layers_to_ingest = [
+        layer for layer in all_layers
+        if not (layer.service_name == parcel_svc and layer.layer_id == 0)
+        if layer.service_type == "FeatureServer"
+        if not (layer.feature_count and layer.feature_count > MAX_FEATURES_PER_LAYER)
+        if layer.geometry_type
+    ]
 
-    for layer in all_layers:
-        if layer.service_name == parcel_svc and layer.layer_id == 0:
-            continue
+    skipped = len(all_layers) - len(layers_to_ingest)
+    sem = asyncio.Semaphore(MAX_CONCURRENT_LAYERS)
 
-        if layer.service_type != "FeatureServer":
-            continue
+    async def _ingest_one(layer: DiscoveredLayer) -> bool:
+        async with sem:
+            fetcher = FeatureFetcher(session, rate_limiter)
+            use_incremental = not full and layer.last_max_oid is not None
+            run_type = "incremental" if use_incremental else "full"
 
-        if layer.feature_count and layer.feature_count > MAX_FEATURES_PER_LAYER:
-            logger.info(
-                "Skipping %s/%d (%d features, exceeds %d limit)",
-                layer.service_name, layer.layer_id,
-                layer.feature_count, MAX_FEATURES_PER_LAYER,
-            )
-            skipped += 1
-            continue
-
-        if not layer.geometry_type:
-            continue
-
-        use_incremental = not full and layer.last_max_oid is not None
-        run_type = "incremental" if use_incremental else "full"
-
-        try:
             run = await _create_run(county_id, layer.id, run_type)
 
             if use_incremental:
@@ -307,7 +299,7 @@ async def _ingest_all_layers(
 
             if not features:
                 await _finish_run(run, 0, 0, 0)
-                continue
+                return True
 
             rows = normalize_gis_features(
                 features, county_id, layer.id, layer.layer_name, run,
@@ -334,16 +326,25 @@ async def _ingest_all_layers(
                 layer.service_name, layer.service_type, layer.layer_id,
                 run_type, stored,
             )
-            ingested += 1
+            return True
 
-        except Exception as e:
+    results = await asyncio.gather(
+        *[_ingest_one(layer) for layer in layers_to_ingest],
+        return_exceptions=True,
+    )
+
+    ingested = sum(1 for r in results if r is True)
+    failed = sum(1 for r in results if isinstance(r, Exception))
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            layer = layers_to_ingest[i]
             logger.error(
-                "Failed layer %s/%d: %s", layer.service_name, layer.layer_id, e,
+                "Failed layer %s/%d: %s", layer.service_name, layer.layer_id, r,
             )
 
     logger.info(
-        "All-layer ingestion: %d layers ingested, %d skipped (too large)",
-        ingested, skipped,
+        "All-layer ingestion: %d layers ingested, %d failed, %d skipped",
+        ingested, failed, skipped,
     )
 
 

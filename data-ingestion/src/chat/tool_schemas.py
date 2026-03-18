@@ -292,4 +292,29 @@ TOOL_SCHEMAS = [
             "required": ["address"],
         },
     },
+    {
+        "type": "function",
+        "name": "compare_zoning",
+        "description": "Compare zoning regulations across DuPage County municipalities (Naperville, Wheaton, Downers Grove) side by side. Returns regulations (setbacks, height limits, lot sizes, FAR) grouped by municipality for easy comparison. Use when the user asks to compare zoning between municipalities.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "municipalities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of municipality names to compare (e.g., ['Naperville', 'Wheaton'])",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Filter by zoning category: residential, commercial, industrial, agricultural, mixed_use, overlay, planned_development",
+                },
+                "codes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter to specific zoning codes (e.g., ['R-1', 'R-2'])",
+                },
+            },
+            "required": ["municipalities"],
+        },
+    },
 ]
