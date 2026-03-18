@@ -4,7 +4,7 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "name": "lookup_parcel",
-        "description": "Look up a parcel by PIN (parcel identification number) or street address. Returns parcel details including owner, assessed value, lot size, and municipality.",
+        "description": "Look up a parcel by PIN (parcel identification number) or street address. Returns parcel details including owner, assessed value, lot size, and municipality. By default includes GeoJSON geometry for map display.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -19,6 +19,10 @@ TOOL_SCHEMAS = [
                 "county": {
                     "type": "string",
                     "description": "County name to filter by (e.g., 'DuPage')",
+                },
+                "include_geometry": {
+                    "type": "boolean",
+                    "description": "Include GeoJSON geometry for map display (default true)",
                 },
             },
         },
@@ -225,5 +229,40 @@ TOOL_SCHEMAS = [
             "required": ["query"],
         },
 
+    },
+    {
+        "type": "function",
+        "name": "get_geometry",
+        "description": "Get geometries for map visualization as a GeoJSON FeatureCollection. Call this after lookup_parcel or spatial_query when the user would benefit from seeing results on a map. Supports lookup by parcel PIN (returns parcel + intersecting features), by GIS layer name, or by lat/lon radius.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pin": {
+                    "type": "string",
+                    "description": "Parcel PIN — returns the parcel polygon plus any intersecting GIS features",
+                },
+                "layer_name": {
+                    "type": "string",
+                    "description": "GIS layer name to fetch geometries from",
+                },
+                "feature_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Specific feature IDs to fetch (use with layer_name)",
+                },
+                "lat": {
+                    "type": "number",
+                    "description": "Latitude for radius search (WGS84)",
+                },
+                "lon": {
+                    "type": "number",
+                    "description": "Longitude for radius search (WGS84)",
+                },
+                "radius_ft": {
+                    "type": "number",
+                    "description": "Search radius in feet (default 500, used with lat/lon)",
+                },
+            },
+        },
     },
 ]
