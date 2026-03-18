@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -8,9 +8,10 @@ import {
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
   SOURCE_ID,
-  FILL_LAYER,
-  LINE_LAYER,
-  CIRCLE_LAYER,
+  FILL_LAYER_ID,
+  LINE_LAYER_ID,
+  CIRCLE_LAYER_ID,
+  INTERACTIVE_LAYERS,
 } from "@/lib/map-styles";
 
 interface MapPanelProps {
@@ -19,13 +20,12 @@ interface MapPanelProps {
   onClose?: () => void;
 }
 
-const INTERACTIVE_LAYERS = [FILL_LAYER.id, LINE_LAYER.id, CIRCLE_LAYER.id];
-
 export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
-  const [isResizing, setIsResizing] = useState(false);
+  const onFeatureClickRef = useRef(onFeatureClick);
+  onFeatureClickRef.current = onFeatureClick;
 
   // Initialize map
   useEffect(() => {
@@ -46,9 +46,41 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
         data: { type: "FeatureCollection", features: [] },
       });
 
-      map.addLayer(FILL_LAYER as maplibregl.LayerSpecification);
-      map.addLayer(LINE_LAYER as maplibregl.LayerSpecification);
-      map.addLayer(CIRCLE_LAYER as maplibregl.LayerSpecification);
+      // Bright fill for polygons — stands out on satellite
+      map.addLayer({
+        id: FILL_LAYER_ID,
+        type: "fill",
+        source: SOURCE_ID,
+        paint: {
+          "fill-color": "#facc15",
+          "fill-opacity": 0.3,
+        },
+      });
+
+      // Bright outline for polygons
+      map.addLayer({
+        id: LINE_LAYER_ID,
+        type: "line",
+        source: SOURCE_ID,
+        paint: {
+          "line-color": "#facc15",
+          "line-width": 2.5,
+        },
+      });
+
+      // Points
+      map.addLayer({
+        id: CIRCLE_LAYER_ID,
+        type: "circle",
+        source: SOURCE_ID,
+        filter: ["==", "$type", "Point"],
+        paint: {
+          "circle-radius": 7,
+          "circle-color": "#facc15",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
 
       // Pointer cursor on hoverable features
       for (const layerId of INTERACTIVE_LAYERS) {
@@ -68,8 +100,6 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
         if (!features.length) return;
 
         const props = features[0].properties || {};
-
-        // Show popup
         const lines: string[] = [];
         if (props.pin) lines.push(`<strong>PIN:</strong> ${props.pin}`);
         if (props.prop_address)
@@ -93,8 +123,15 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
           )
           .addTo(map);
 
-        onFeatureClick?.(props);
+        onFeatureClickRef.current?.(props);
       });
+
+      // If geojson already available at mount time, set it
+      if (geojson?.features?.length) {
+        const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource;
+        source?.setData(geojson);
+        fitToData(map, geojson);
+      }
     });
 
     mapRef.current = map;
@@ -106,7 +143,7 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update GeoJSON data
+  // Update GeoJSON data when prop changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -115,33 +152,11 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
       const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource;
       if (!source) return;
 
-      const data: GeoJSON.FeatureCollection = geojson?.features?.length
-        ? geojson
-        : { type: "FeatureCollection", features: [] };
-
-      source.setData(data);
-
-      // Fit bounds if we have features
-      if (geojson?.bbox && geojson.bbox.length === 4) {
-        const [minLon, minLat, maxLon, maxLat] = geojson.bbox;
-        map.fitBounds(
-          [
-            [minLon, minLat],
-            [maxLon, maxLat],
-          ],
-          { padding: 60, maxZoom: 17, duration: 800 }
-        );
-      } else if (geojson?.features?.length) {
-        // Compute bounds manually
-        const bounds = new maplibregl.LngLatBounds();
-        for (const f of geojson.features) {
-          if (f.geometry && "coordinates" in f.geometry) {
-            addCoordsToBounds(f.geometry.coordinates, bounds);
-          }
-        }
-        if (!bounds.isEmpty()) {
-          map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 800 });
-        }
+      if (geojson?.features?.length) {
+        source.setData(geojson);
+        fitToData(map, geojson);
+      } else {
+        source.setData({ type: "FeatureCollection", features: [] });
       }
     };
 
@@ -152,7 +167,7 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
     }
   }, [geojson]);
 
-  // Resize map when panel resizes
+  // Resize map when container resizes
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -161,66 +176,77 @@ export function MapPanel({ geojson, onFeatureClick, onClose }: MapPanelProps) {
     return () => observer.disconnect();
   }, []);
 
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsResizing(true);
-
-      const startX = e.clientX;
-      const panel = containerRef.current?.parentElement;
-      if (!panel) return;
-      const startWidth = panel.getBoundingClientRect().width;
-
-      const onMouseMove = (ev: MouseEvent) => {
-        const delta = startX - ev.clientX;
-        const newWidth = Math.max(300, Math.min(startWidth + delta, window.innerWidth * 0.7));
-        panel.style.width = `${newWidth}px`;
-        panel.style.flexShrink = "0";
-        mapRef.current?.resize();
-      };
-
-      const onMouseUp = () => {
-        setIsResizing(false);
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-      };
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    []
-  );
+  const handleRecenter = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !geojson?.features?.length) return;
+    fitToData(map, geojson);
+  }, [geojson]);
 
   return (
-    <div className="relative flex h-full w-full">
-      {/* Resize handle */}
-      <div
-        onMouseDown={handleResizeStart}
-        className={`absolute left-0 top-0 z-10 h-full w-1.5 cursor-col-resize transition-colors hover:bg-foreground/10 ${
-          isResizing ? "bg-foreground/15" : ""
-        }`}
-      />
+    <div className="relative h-full w-full">
+      {/* Top-right controls */}
+      <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5">
+        {/* Recenter button */}
+        <button
+          onClick={handleRecenter}
+          className="flex h-7 w-7 items-center justify-center rounded-md bg-background/80 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground"
+          aria-label="Recenter map"
+          title="Recenter on data"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+          </svg>
+        </button>
 
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-background/80 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground"
-        aria-label="Close map"
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path
-            d="M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="flex h-7 w-7 items-center justify-center rounded-md bg-background/80 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground"
+          aria-label="Close map"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path
+              d="M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      </div>
 
       {/* Map container */}
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );
+}
+
+function fitToData(
+  map: maplibregl.Map,
+  geojson: GeoJSON.FeatureCollection
+): void {
+  if (geojson.bbox && geojson.bbox.length === 4) {
+    const [minLon, minLat, maxLon, maxLat] = geojson.bbox;
+    map.fitBounds(
+      [
+        [minLon, minLat],
+        [maxLon, maxLat],
+      ],
+      { padding: 60, maxZoom: 17, duration: 800 }
+    );
+    return;
+  }
+
+  const bounds = new maplibregl.LngLatBounds();
+  for (const f of geojson.features) {
+    if (f.geometry && "coordinates" in f.geometry) {
+      addCoordsToBounds(f.geometry.coordinates, bounds);
+    }
+  }
+  if (!bounds.isEmpty()) {
+    map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 800 });
+  }
 }
 
 function addCoordsToBounds(

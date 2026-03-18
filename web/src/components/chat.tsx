@@ -32,7 +32,9 @@ export function Chat() {
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
   const [toolStatus, setToolStatus] = useState<string[] | null>(null);
   const [mapGeojson, setMapGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
-  const showMap = mapGeojson !== null && (mapGeojson.features?.length ?? 0) > 0;
+  const [mapVisible, setMapVisible] = useState(true);
+  const hasMapData = mapGeojson !== null && (mapGeojson.features?.length ?? 0) > 0;
+  const showMap = hasMapData && mapVisible;
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const collapseScheduledRef = useRef(false);
@@ -89,7 +91,10 @@ export function Chat() {
           },
           onToolStatus: (tools) => setToolStatus(tools),
           onToolStatusEnd: () => setToolStatus(null),
-          onMapData: (geojson) => setMapGeojson(geojson),
+          onMapData: (geojson) => {
+            setMapGeojson(geojson);
+            setMapVisible(true);
+          },
           onToken: (token) => {
             if (!collapseScheduledRef.current) {
               collapseScheduledRef.current = true;
@@ -144,6 +149,7 @@ export function Chat() {
     setSessionId(null);
     setError(null);
     setMapGeojson(null);
+    setMapVisible(true);
   }, [sessionId]);
 
   const handleFeatureClick = useCallback(
@@ -191,6 +197,19 @@ export function Chat() {
           County GIS Chat
         </h1>
         <div className="flex items-center gap-4">
+          {hasMapData && !mapVisible && (
+            <button
+              onClick={() => setMapVisible(true)}
+              className="flex items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                <line x1="8" y1="2" x2="8" y2="18" />
+                <line x1="16" y1="6" x2="16" y2="22" />
+              </svg>
+              Show map
+            </button>
+          )}
           {messages.length > 0 && (
             <button
               onClick={handleReset}
@@ -213,7 +232,7 @@ export function Chat() {
 
       {/* Messages + Map */}
       <div className="flex flex-1 overflow-hidden">
-        <div className={`flex-1 overflow-y-auto transition-all duration-300`}>
+        <div className={`overflow-y-auto transition-all duration-300 ${showMap ? "w-1/2" : "w-full"}`}>
           <div className={`mx-auto px-6 ${showMap ? "max-w-xl" : "max-w-2xl"}`}>
             {messages.length === 0 ? (
               <div className="flex h-[60vh] flex-col items-center justify-center">
@@ -308,14 +327,11 @@ export function Chat() {
         </div>
 
         {showMap && (
-          <div
-            className="border-l border-border/50"
-            style={{ width: "50%", flexShrink: 0 }}
-          >
+          <div className="w-1/2 shrink-0 border-l border-border/50">
             <MapPanel
               geojson={mapGeojson}
               onFeatureClick={handleFeatureClick}
-              onClose={() => setMapGeojson(null)}
+              onClose={() => setMapVisible(false)}
             />
           </div>
         )}
