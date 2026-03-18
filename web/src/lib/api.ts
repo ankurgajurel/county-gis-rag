@@ -3,6 +3,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export interface ChatRequest {
   message: string;
   session_id?: string | null;
+  user_email?: string | null;
 }
 
 export interface StreamCallbacks {
@@ -98,4 +99,40 @@ export async function resetChat(sessionId: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: "", session_id: sessionId }),
   });
+}
+
+export interface HistoryItem {
+  id: string;
+  title: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export async function fetchChatHistory(userEmail: string): Promise<HistoryItem[]> {
+  const res = await fetch(`${API_BASE}/chat/history?user_email=${encodeURIComponent(userEmail)}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export interface ChatSessionData {
+  session: {
+    id: string;
+    title: string | null;
+    map_geojson: GeoJSON.FeatureCollection | null;
+  };
+  messages: {
+    role: "user" | "assistant";
+    content: string;
+    reasoning: { title: string; content: string }[] | null;
+  }[];
+}
+
+export async function fetchChatSession(sessionId: string): Promise<ChatSessionData | null> {
+  const res = await fetch(`${API_BASE}/chat/history/${sessionId}`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await fetch(`${API_BASE}/chat/history/${sessionId}`, { method: "DELETE" });
 }

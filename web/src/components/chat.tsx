@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { useUser, useClerk } from "@clerk/nextjs";
-import { streamChat, resetChat } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { streamChat, resetChat, fetchChatSession } from "@/lib/api";
 import { Thinking, type ReasoningBlock } from "@/components/thinking";
 import { MapPanel } from "@/components/map-panel";
 
@@ -17,22 +18,32 @@ interface Message {
 }
 
 const SUGGESTIONS = [
-  "What's the zoning for 425 Fawell Blvd in Naperville?",
-  "Compare residential zoning regulations across all municipalities",
-  "Find the 10 highest assessed properties in Naperville",
-  "Which GIS layers have flood zone data?",
-  "What are the setback requirements for R-1 in Wheaton?",
+  "What municipalities are in DuPage County?",
+  "I want to open a restaurant in Naperville — what zones allow that?",
+  "Show me the most valuable properties in Hinsdale",
+  "Compare residential zoning rules between Wheaton and Downers Grove",
+  "What water features exist near downtown Elmhurst?",
 ];
 
-export function Chat() {
+interface ChatProps {
+  initialSessionId?: string;
+}
+
+export function Chat({ initialSessionId }: ChatProps) {
   const { user } = useUser();
   const { signOut } = useClerk();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [loadingSession, setLoadingSession] = useState(!!initialSessionId);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [completedIn, setCompletedIn] = useState<number | null>(null);
+  const streamStartRef = useRef<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
   const [toolStatus, setToolStatus] = useState<string[] | null>(null);
@@ -55,6 +66,14 @@ export function Chat() {
       collapseScheduledRef.current = false;
       setIsThinkingExpanded(true);
       setToolStatus(null);
+      setCompletedIn(null);
+      setElapsed(0);
+      streamStartRef.current = Date.now();
+      timerRef.current = setInterval(() => {
+        if (streamStartRef.current) {
+          setElapsed(Math.floor((Date.now() - streamStartRef.current) / 1000));
+        }
+      }, 1000);
 
       setMessages((prev) => [
         ...prev,
@@ -63,9 +82,12 @@ export function Chat() {
       ]);
 
       await streamChat(
-        { message: trimmed, session_id: sessionId },
+        { message: trimmed, session_id: sessionId, user_email: user?.emailAddresses[0]?.emailAddress },
         {
-          onSessionId: (id) => setSessionId(id),
+          onSessionId: (id) => {
+            setSessionId(id);
+            window.history.replaceState(null, "", `/chat/${id}`);
+          },
           onReasoningDelta: (content) => {
             setIsThinkingExpanded(true);
             setMessages((prev) => {
@@ -117,7 +139,14 @@ export function Chat() {
               return updated;
             });
           },
-          onDone: () => setIsStreaming(false),
+          onDone: () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+            if (streamStartRef.current) {
+              setCompletedIn(Math.floor((Date.now() - streamStartRef.current) / 1000));
+            }
+            streamStartRef.current = null;
+            setIsStreaming(false);
+          },
           onError: (err) => {
             setMessages((prev) => {
               const updated = [...prev];
@@ -135,6 +164,8 @@ export function Chat() {
                 ? updated.slice(0, -1)
                 : updated;
             });
+            if (timerRef.current) clearInterval(timerRef.current);
+            streamStartRef.current = null;
             setError(err.message);
             setIsStreaming(false);
           },
@@ -155,7 +186,9 @@ export function Chat() {
     setError(null);
     setMapGeojson(null);
     setMapVisible(true);
-  }, [sessionId]);
+    setCompletedIn(null);
+    router.push("/");
+  }, [sessionId, router]);
 
   const handleFeatureClick = useCallback(
     (properties: Record<string, unknown>) => {
@@ -171,12 +204,46 @@ export function Chat() {
     []
   );
 
+  const handleLoadSession = useCallback(async (id: string) => {
+    setLoadingSession(true);
+    const data = await fetchChatSession(id);
+    setLoadingSession(false);
+    if (!data) return;
+
+    setSessionId(id);
+    setMessages(
+      data.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        reasoning: m.reasoning || undefined,
+      }))
+    );
+    setMapGeojson(data.session.map_geojson);
+    setMapVisible(data.session.map_geojson !== null);
+    setError(null);
+  }, []);
+
+  // Load session from URL param (e.g. navigating from history or /chat/[id])
+  const loadedSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialSessionId && initialSessionId !== loadedSessionRef.current) {
+      loadedSessionRef.current = initialSessionId;
+      handleLoadSession(initialSessionId);
+    }
+  }, [initialSessionId, handleLoadSession]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -205,13 +272,32 @@ export function Chat() {
     (msg.reasoning && msg.reasoning.length > 0) ||
     (msg.reasoningText && msg.reasoningText.length > 0);
 
+  const formatTime = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  };
+
   return (
     <div className="flex h-dvh flex-col bg-background">
       {/* Header */}
       <header className="flex shrink-0 items-center justify-between border-b border-border/50 px-6 py-4">
-        <h1 className="text-sm font-medium tracking-tight text-foreground">
-          County GIS Chat
-        </h1>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push("/history")}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            aria-label="Chat history"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </button>
+          <h1 className="text-sm font-medium tracking-tight text-foreground">
+            County GIS Chat
+          </h1>
+        </div>
         <div className="flex items-center gap-4">
           {hasMapData && !mapVisible && (
             <button
@@ -275,7 +361,11 @@ export function Chat() {
       <div className="flex flex-1 overflow-hidden">
         <div className={`overflow-y-auto transition-all duration-300 ${showMap ? "w-1/2" : "w-full"}`}>
           <div className={`mx-auto px-6 ${showMap ? "max-w-xl" : "max-w-2xl"}`}>
-            {messages.length === 0 ? (
+            {loadingSession ? (
+              <div className="flex h-[60vh] items-center justify-center">
+                <p className="text-sm text-muted-foreground">Loading conversation...</p>
+              </div>
+            ) : messages.length === 0 ? (
               <div className="flex h-[60vh] flex-col items-center justify-center">
                 <div className="text-center">
                   <h2 className="text-lg font-medium tracking-tight text-foreground">
@@ -303,19 +393,43 @@ export function Chat() {
               <div className="py-8 space-y-6">
                 {messages.map((msg, i) => (
                   <div key={i} className="flex gap-4">
-                    <div
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-                        msg.role === "user"
-                          ? "bg-foreground text-background"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {msg.role === "user" ? "Y" : "A"}
-                    </div>
+                    {msg.role === "user" && user?.imageUrl ? (
+                      <img
+                        src={user.imageUrl}
+                        alt=""
+                        className="h-7 w-7 shrink-0 rounded-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+                          msg.role === "user"
+                            ? "bg-foreground text-background"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {msg.role === "user"
+                          ? (user?.firstName?.[0] || user?.emailAddresses[0]?.emailAddress[0]?.toUpperCase() || "U")
+                          : "A"}
+                      </div>
+                    )}
                     <div className="min-w-0 pt-0.5">
                       <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                        {msg.role === "user" ? "You" : "Assistant"}
+                        {msg.role === "user"
+                          ? (user?.fullName || user?.firstName || "You")
+                          : "Assistant"}
                       </p>
+                      {msg.role === "assistant" && i === messages.length - 1 && (
+                        isStreaming ? (
+                          <p className="text-[11px] text-muted-foreground/60 mb-1 tabular-nums">
+                            {formatTime(elapsed)}
+                          </p>
+                        ) : completedIn !== null ? (
+                          <p className="text-[11px] text-muted-foreground/60 mb-1">
+                            Completed in {formatTime(completedIn)}
+                          </p>
+                        ) : null
+                      )}
                       {msg.role === "assistant" && hasThinking(msg) && (
                         <div className="mt-3 mb-3">
                           <Thinking
@@ -419,6 +533,7 @@ export function Chat() {
           </p>
         </div>
       </div>
+
     </div>
   );
 }

@@ -1,5 +1,6 @@
 """PostGIS schema models."""
 
+import uuid as _uuid
 from datetime import datetime
 
 from geoalchemy2 import Geometry
@@ -244,4 +245,39 @@ class DocumentChunk(Base):
 
     __table_args__ = (
         Index("idx_document_chunks_source", "source_type", "source_id"),
+    )
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    user_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255))
+    last_response_id: Mapped[str | None] = mapped_column(String(255))
+    map_geojson: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    messages: Mapped[list["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at")
+
+    __table_args__ = (
+        Index("idx_chat_sessions_user", "user_email", "updated_at"),
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    reasoning: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+    __table_args__ = (
+        Index("idx_chat_messages_session", "session_id", "created_at"),
     )
