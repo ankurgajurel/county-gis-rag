@@ -14,7 +14,7 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.orm import selectinload
 
 from src.chat.engine import ChatEngine
-from src.db.engine import async_session
+from src.db.engine import async_session, engine
 from src.db.models import ChatSession, ChatMessage
 from src.utils.logging import setup_logging
 
@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     yield
     sessions.clear()
+    await engine.dispose()
 
 
 app = FastAPI(title="County GIS Chat", lifespan=lifespan)

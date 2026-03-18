@@ -36,10 +36,16 @@ export default function HistoryPage() {
       router.replace("/sign-in");
       return;
     }
-    fetchChatHistory(userEmail).then((data) => {
-      setItems(data);
-      setLoading(false);
-    });
+    fetchChatHistory(userEmail)
+      .then((data) => {
+        setItems(data);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch chat history:", err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [isLoaded, userEmail, router]);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
