@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from "react";
 import ReactMarkdown from "react-markdown";
+import { useUser, useClerk } from "@clerk/nextjs";
 import { streamChat, resetChat } from "@/lib/api";
 import { Thinking, type ReasoningBlock } from "@/components/thinking";
 import { MapPanel } from "@/components/map-panel";
@@ -24,6 +25,10 @@ const SUGGESTIONS = [
 ];
 
 export function Chat() {
+  const { user } = useUser();
+  const { signOut } = useClerk();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -174,6 +179,17 @@ export function Chat() {
   };
 
   useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -218,15 +234,40 @@ export function Chat() {
               New chat
             </button>
           )}
-          <button
-            onClick={async () => {
-              await fetch("/api/auth/logout", { method: "POST" });
-              window.location.href = "/login";
-            }}
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Logout
-          </button>
+          {user && (
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full overflow-hidden ring-1 ring-border/60 transition-shadow hover:ring-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {user.imageUrl ? (
+                  <img
+                    src={user.imageUrl}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center bg-foreground text-background text-xs font-medium">
+                    {user.firstName?.[0] || user.emailAddresses[0]?.emailAddress[0]?.toUpperCase() || "U"}
+                  </span>
+                )}
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1.5 min-w-[140px] rounded-md border border-border bg-popover p-1 shadow-md">
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      signOut({ redirectUrl: "/sign-in" });
+                    }}
+                    className="flex w-full items-center rounded-sm px-3 py-1.5 text-xs text-popover-foreground transition-colors hover:bg-muted"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
