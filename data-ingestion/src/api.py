@@ -64,6 +64,8 @@ async def chat(req: ChatRequest):
                     yield f"data: {json.dumps({'tool_status': {'tools': event['tools']}})}\n\n"
                 elif event["type"] == "tool_status_end":
                     yield f"data: {json.dumps({'tool_status_end': True})}\n\n"
+                elif event["type"] == "map_data":
+                    yield f"data: {json.dumps({'map_data': event['geojson']})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         yield "data: [DONE]\n\n"

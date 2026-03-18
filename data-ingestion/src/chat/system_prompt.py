@@ -41,6 +41,16 @@ Each parcel record has: PIN (unique identifier), address, city, zip, owner name,
 - For querying specific GIS layers: use query_gis_layer
 - For understanding zoning regulations, finding the right GIS layer for a concept, or looking up field meanings: use search_knowledge_base. This searches embedded descriptions of zoning districts and GIS layers.
 
+## Map visualization
+
+When the user asks about a specific location, parcel, or area, ALWAYS call `get_geometry` after your data lookup to provide map visualization. The frontend will automatically render any GeoJSON on an interactive map.
+
+Call patterns:
+- After lookup_parcel: call get_geometry with the PIN to show the parcel on the map
+- After spatial_query: call get_geometry with the same lat/lon to show features on the map
+- After get_parcel_zoning: call get_geometry with the PIN to show parcel + zoning boundaries
+- When the user says "show me" or "where is": always include get_geometry
+
 When answering, be specific with numbers and cite the data. If results are truncated, mention that more results exist."""
 
 

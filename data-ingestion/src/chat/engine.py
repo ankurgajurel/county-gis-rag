@@ -109,6 +109,12 @@ class ChatEngine:
                 tool_outputs = []
                 for item_id, fc in function_calls.items():
                     result = await self._execute_tool_by_name(fc["name"], fc["arguments"])
+
+                    # Emit map_data SSE events for GeoJSON results
+                    geojson = self._extract_geojson(result)
+                    if geojson:
+                        yield {"type": "map_data", "geojson": geojson}
+
                     tool_outputs.append({
                         "type": "function_call_output",
                         "call_id": fc.get("call_id", item_id),
@@ -137,6 +143,20 @@ class ChatEngine:
             if event["type"] == "token":
                 full_text += event["content"]
         return full_text
+
+    @staticmethod
+    def _extract_geojson(result: dict) -> dict | None:
+        """Extract a GeoJSON FeatureCollection from a tool result."""
+        if not isinstance(result, dict):
+            return None
+        # Top-level FeatureCollection (e.g. get_geometry)
+        if result.get("type") == "FeatureCollection" and result.get("features"):
+            return result
+        # Nested under "geojson" key (e.g. lookup_parcel with include_geometry)
+        geojson = result.get("geojson")
+        if isinstance(geojson, dict) and geojson.get("type") == "FeatureCollection" and geojson.get("features"):
+            return geojson
+        return None
 
     async def _execute_tool_by_name(self, name: str, arguments_json: str) -> dict:
         try:
